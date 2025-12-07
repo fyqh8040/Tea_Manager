@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { 
@@ -11,7 +12,8 @@ import {
   Upload, 
   Camera, 
   Leaf, 
-  Coffee 
+  Coffee,
+  RotateCcw
 } from 'lucide-react';
 
 // --- Types ---
@@ -34,6 +36,30 @@ interface ImageConfig {
   apiUrl: string;
   apiToken: string;
 }
+
+// --- Constants ---
+const DEFAULT_API_URL = 'https://cfbed.sanyue.de/api/upload';
+
+// --- Helper for Safe Env Access ---
+const getEnv = (key: string): string | undefined => {
+  // 1. Try process.env (Next.js / CRA / Webpack)
+  try {
+    if (typeof process !== 'undefined' && process.env && process.env[key]) {
+      return process.env[key];
+    }
+  } catch (e) {}
+  
+  // 2. Try import.meta.env (Vite)
+  try {
+    // @ts-ignore
+    if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env[key]) {
+      // @ts-ignore
+      return import.meta.env[key];
+    }
+  } catch (e) {}
+
+  return undefined;
+};
 
 // --- Mock Data ---
 
@@ -61,16 +87,6 @@ const INITIAL_DATA: TeaItem[] = [
     createdAt: Date.now() - 10000,
   }
 ];
-
-// --- Helper for Safe Env Access ---
-const getEnv = (key: string, fallback: string = '') => {
-  try {
-    // @ts-ignore - process is defined during build time in Vercel/Next.js/Vite
-    return typeof process !== 'undefined' && process.env[key] ? process.env[key] : fallback;
-  } catch (e) {
-    return fallback;
-  }
-};
 
 // --- Components ---
 
@@ -141,21 +157,37 @@ const App = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<TeaItem | null>(null);
   
-  // Image Config State (Prioritize LocalStorage -> Env Vars -> Default)
+  // Image Config State
   const [imageConfig, setImageConfig] = useState<ImageConfig>(() => {
-    // 1. Try LocalStorage
-    const savedConfig = localStorage.getItem('tea_image_config');
-    if (savedConfig) {
-      return JSON.parse(savedConfig);
-    }
-    // 2. Try Environment Variables (Vercel)
+    // Determine Env Vars
     const envUrl = getEnv('NEXT_PUBLIC_IMAGE_API_URL');
     const envToken = getEnv('NEXT_PUBLIC_IMAGE_API_TOKEN');
     
-    // 3. Fallback
+    const effectiveDefaultUrl = envUrl || DEFAULT_API_URL;
+    const effectiveDefaultToken = envToken || '';
+
+    // 1. Try LocalStorage
+    const savedConfigStr = localStorage.getItem('tea_image_config');
+    if (savedConfigStr) {
+      const savedConfig = JSON.parse(savedConfigStr);
+      
+      // Intelligent Correction:
+      // If the saved URL is the *old default* AND we now have a *new env var*, 
+      // it means the cache is stale. Ignore cache and use Env Var.
+      if (savedConfig.apiUrl === DEFAULT_API_URL && envUrl && envUrl !== DEFAULT_API_URL) {
+         console.log('Detected stale config. Updating to Environment Variable.');
+         return {
+           apiUrl: envUrl,
+           apiToken: envToken || savedConfig.apiToken
+         };
+      }
+      return savedConfig;
+    }
+
+    // 2. Use Env Vars or Default
     return {
-      apiUrl: envUrl || 'https://cfbed.sanyue.de/api/upload', 
-      apiToken: envToken || '' 
+      apiUrl: effectiveDefaultUrl,
+      apiToken: effectiveDefaultToken
     };
   });
 
@@ -210,6 +242,19 @@ const App = () => {
     }
     setIsModalOpen(false);
     setEditingItem(null);
+  };
+
+  const handleResetConfig = () => {
+    const envUrl = getEnv('NEXT_PUBLIC_IMAGE_API_URL');
+    const envToken = getEnv('NEXT_PUBLIC_IMAGE_API_TOKEN');
+    
+    const defaultConfig = {
+      apiUrl: envUrl || DEFAULT_API_URL,
+      apiToken: envToken || ''
+    };
+    
+    setImageConfig(defaultConfig);
+    return defaultConfig;
   };
 
   return (
@@ -359,6 +404,7 @@ const App = () => {
           onClose={() => setIsSettingsOpen(false)}
           config={imageConfig}
           onSave={setImageConfig}
+          onReset={handleResetConfig}
         />
       )}
     </div>
@@ -591,7 +637,7 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, imageConfig }: any
   );
 };
 
-const SettingsModal = ({ isOpen, onClose, config, onSave }: any) => {
+const SettingsModal = ({ isOpen, onClose, config, onSave, onReset }: any) => {
   const [localConfig, setLocalConfig] = useState(config);
 
   if (!isOpen) return null;
@@ -629,9 +675,19 @@ const SettingsModal = ({ isOpen, onClose, config, onSave }: any) => {
           />
         </div>
 
-        <div className="flex justify-end gap-3">
-          <Button variant="secondary" onClick={onClose}>取消</Button>
-          <Button onClick={() => { onSave(localConfig); onClose(); }}>保存配置</Button>
+        <div className="flex justify-between gap-3 pt-2 border-t border-tea-50">
+          <Button variant="ghost" onClick={() => {
+             if(confirm("确定要重置为系统默认配置（读取环境变量）吗？")) {
+               const defaults = onReset();
+               setLocalConfig(defaults);
+             }
+          }} className="text-red-400 hover:text-red-600 hover:bg-red-50 !px-2">
+            <RotateCcw size={16} className="mr-1"/> 重置默认
+          </Button>
+          <div className="flex gap-3">
+             <Button variant="secondary" onClick={onClose}>取消</Button>
+             <Button onClick={() => { onSave(localConfig); onClose(); }}>保存配置</Button>
+          </div>
         </div>
       </div>
     </div>
