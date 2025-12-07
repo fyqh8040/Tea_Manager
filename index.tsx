@@ -317,7 +317,8 @@ const App = () => {
           // IMPORTANT: Parse numeric fields from DB (which might be returned as strings by postgres driver)
           const parsedItems = data.map(item => ({
             ...item,
-            quantity: Number(item.quantity) // Ensure quantity is a number
+            quantity: Number(item.quantity), // Ensure quantity is a number
+            created_at: Number(item.created_at) // Ensure created_at is a number (FIX: Fix 'Invalid Date' issue)
           }));
           setItems(parsedItems);
       }
@@ -947,7 +948,8 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, onStockUpdate, con
                 const parsedLogs = json.data.map((log: any) => ({
                     ...log,
                     change_amount: Number(log.change_amount),
-                    current_balance: Number(log.current_balance)
+                    current_balance: Number(log.current_balance),
+                    created_at: Number(log.created_at) // FIX: Parse created_at here too for consistency
                 }));
                 setLogs(parsedLogs);
             }
