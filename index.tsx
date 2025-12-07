@@ -20,69 +20,10 @@ import {
   RotateCcw,
   LogOut,
   Cpu,
-  Bug
+  Bug,
+  Server,
+  Wifi
 } from 'lucide-react';
-
-// --- Helper for Safe Env Access (EXPLICIT ACCESS REQUIRED FOR BUNDLERS) ---
-// Bundlers like Webpack/Next.js replace 'process.env.VAR' statically at build time.
-// Dynamic access like process.env[key] DOES NOT WORK for build-time injection.
-const getSystemEnv = () => {
-  const envs = {
-    supabaseUrl: '',
-    supabaseKey: '',
-    imageApiUrl: '',
-    imageApiToken: ''
-  };
-  
-  const debugInfo: any = {
-    processDefined: typeof process !== 'undefined',
-    processEnvDefined: typeof process !== 'undefined' && !!process.env,
-    importMetaDefined: typeof import.meta !== 'undefined',
-    importMetaEnvDefined: typeof import.meta !== 'undefined' && !!import.meta.env,
-    raw: {}
-  };
-
-  // 1. Try process.env (Next.js / CRA / Webpack)
-  try {
-    if (typeof process !== 'undefined' && process.env) {
-      envs.supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-      envs.supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-      envs.imageApiUrl = process.env.NEXT_PUBLIC_IMAGE_API_URL || '';
-      envs.imageApiToken = process.env.NEXT_PUBLIC_IMAGE_API_TOKEN || '';
-      
-      // For Debugging
-      debugInfo.raw.process = {
-        NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL ? 'Has Value' : 'Undefined/Empty',
-      };
-    }
-  } catch (e) {}
-
-  // 2. Try import.meta.env (Vite)
-  try {
-    // @ts-ignore
-    if (typeof import.meta !== 'undefined' && import.meta.env) {
-      // @ts-ignore
-      envs.supabaseUrl = envs.supabaseUrl || import.meta.env.NEXT_PUBLIC_SUPABASE_URL || '';
-      // @ts-ignore
-      envs.supabaseKey = envs.supabaseKey || import.meta.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-      // @ts-ignore
-      envs.imageApiUrl = envs.imageApiUrl || import.meta.env.NEXT_PUBLIC_IMAGE_API_URL || '';
-      // @ts-ignore
-      envs.imageApiToken = envs.imageApiToken || import.meta.env.NEXT_PUBLIC_IMAGE_API_TOKEN || '';
-
-       // For Debugging
-       debugInfo.raw.importMeta = {
-        // @ts-ignore
-        NEXT_PUBLIC_SUPABASE_URL: import.meta.env.NEXT_PUBLIC_SUPABASE_URL ? 'Has Value' : 'Undefined/Empty',
-      };
-    }
-  } catch (e) {}
-  
-  // Defaults
-  if (!envs.imageApiUrl) envs.imageApiUrl = 'https://cfbed.sanyue.de/api/upload';
-
-  return { envs, debugInfo };
-};
 
 // --- Types ---
 
@@ -166,34 +107,68 @@ const Badge = ({ children, color = 'tea' }: any) => {
 // --- Main Application ---
 
 const App = () => {
-  // Config State (Priority: LocalStorage > Env Vars)
+  // Config State
   const [config, setConfig] = useState<AppConfig>(() => {
-    // 1. Get System Env Vars (Explicitly)
-    const { envs } = getSystemEnv();
-
-    // 2. Get Saved Config
     const saved = localStorage.getItem('tea_app_config');
-    
     if (saved) {
-      const parsed = JSON.parse(saved);
-      // Smart Merge: If saved value is falsy (empty) but env has value, use Env
-      return {
-        supabaseUrl: parsed.supabaseUrl || envs.supabaseUrl,
-        supabaseKey: parsed.supabaseKey || envs.supabaseKey,
-        imageApiUrl: parsed.imageApiUrl || envs.imageApiUrl,
-        imageApiToken: parsed.imageApiToken || envs.imageApiToken
-      };
+      return JSON.parse(saved);
     }
-
-    // 3. Default to Env
-    return envs;
+    return {
+      supabaseUrl: '',
+      supabaseKey: '',
+      imageApiUrl: 'https://cfbed.sanyue.de/api/upload',
+      imageApiToken: ''
+    };
   });
+
+  const [serverConfig, setServerConfig] = useState<AppConfig | null>(null);
+  const [isEnvLoading, setIsEnvLoading] = useState(false);
+
+  // Fetch Env from API on Mount
+  useEffect(() => {
+    const fetchEnv = async () => {
+      setIsEnvLoading(true);
+      try {
+        const res = await fetch('/api/env');
+        if (res.ok) {
+          const envData = await res.json();
+          setServerConfig(envData);
+          
+          // Auto-inject if local config is empty
+          setConfig(prev => {
+            const newConfig = { ...prev };
+            let changed = false;
+            
+            if (!newConfig.supabaseUrl && envData.supabaseUrl) {
+              newConfig.supabaseUrl = envData.supabaseUrl;
+              changed = true;
+            }
+            if (!newConfig.supabaseKey && envData.supabaseKey) {
+              newConfig.supabaseKey = envData.supabaseKey;
+              changed = true;
+            }
+            if ((!newConfig.imageApiUrl || newConfig.imageApiUrl.includes('cfbed')) && envData.imageApiUrl) {
+              newConfig.imageApiUrl = envData.imageApiUrl;
+              changed = true;
+            }
+
+            return changed ? newConfig : prev;
+          });
+        }
+      } catch (e) {
+        console.warn("Failed to fetch environment variables from API", e);
+      } finally {
+        setIsEnvLoading(false);
+      }
+    };
+    
+    fetchEnv();
+  }, []);
 
   // Supabase Client Instance
   const supabase = useMemo(() => {
     if (config.supabaseUrl && config.supabaseKey) {
       try {
-        // Validate URL format simply to prevent crash
         if (!config.supabaseUrl.startsWith('http')) return null;
         return createClient(config.supabaseUrl, config.supabaseKey);
       } catch (e) {
@@ -239,7 +214,6 @@ const App = () => {
       if (data) setItems(data as TeaItem[]);
     } catch (error) {
       console.error('Error fetching tea items:', error);
-      // Don't alert on initial load if just unconfigured, but do log
     } finally {
       setIsLoading(false);
     }
@@ -496,6 +470,8 @@ const App = () => {
           isOpen={isSettingsOpen} 
           onClose={() => setIsSettingsOpen(false)}
           config={config}
+          serverConfig={serverConfig}
+          isEnvLoading={isEnvLoading}
           onSave={setConfig}
         />
       )}
@@ -716,24 +692,29 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, config }: any) => 
 
 // --- Settings Modal ---
 
-const SettingsModal = ({ isOpen, onClose, config, onSave }: any) => {
+const SettingsModal = ({ isOpen, onClose, config, onSave, serverConfig, isEnvLoading }: any) => {
   const [localConfig, setLocalConfig] = useState<AppConfig>(config);
-  const [showDebug, setShowDebug] = useState(false);
   
-  // Detect actual Env vars for debugging (Using the explicit getter)
-  const { envs, debugInfo } = getSystemEnv();
-
   useEffect(() => {
     setLocalConfig(config);
   }, [config]);
 
   const handleResetToEnv = () => {
-    const { envs } = getSystemEnv();
-    setLocalConfig(envs);
-    alert('已加载系统环境变量，请点击“保存”以应用。');
+    if (serverConfig) {
+      setLocalConfig(serverConfig);
+      alert('已加载系统环境变量，请点击“保存”以应用。');
+    } else {
+      alert('未能获取到系统变量，请检查 Vercel 部署。');
+    }
   };
 
   if (!isOpen) return null;
+
+  const envStatus = {
+     connected: !!serverConfig,
+     hasUrl: !!serverConfig?.supabaseUrl,
+     hasKey: !!serverConfig?.supabaseKey
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -751,40 +732,32 @@ const SettingsModal = ({ isOpen, onClose, config, onSave }: any) => {
           <div className="bg-stone-50 p-3 rounded-lg border border-stone-200">
              <div className="flex items-center justify-between gap-2 mb-2 text-tea-800 text-sm font-bold">
                <div className="flex items-center gap-2">
-                 <Cpu size={14}/> 环境变量诊断
+                 <Server size={14}/> 环境变量服务状态
                </div>
-               <button onClick={() => setShowDebug(!showDebug)} className="text-xs text-tea-400 hover:text-tea-600 underline">
-                 {showDebug ? '隐藏详情' : '显示调试详情'}
-               </button>
+               <div className="flex items-center gap-1 text-xs">
+                 {isEnvLoading ? (
+                   <span className="flex items-center gap-1 text-tea-400"><Loader2 size={10} className="animate-spin"/> 连接中...</span>
+                 ) : envStatus.connected ? (
+                   <span className="flex items-center gap-1 text-green-600"><Wifi size={10}/> 已连接到云端</span>
+                 ) : (
+                   <span className="flex items-center gap-1 text-red-500"><Wifi size={10}/> 无法连接云端</span>
+                 )}
+               </div>
              </div>
              
              <div className="space-y-1 text-xs text-tea-600">
                <div className="flex justify-between">
                  <span>Supabase URL:</span>
-                 {envs.supabaseUrl ? <span className="text-green-600 font-mono">✅ 已注入</span> : <span className="text-red-500 font-mono">❌ 未找到</span>}
+                 {envStatus.hasUrl ? <span className="text-green-600 font-mono">✅ 已获取</span> : <span className="text-red-500 font-mono">❌ 未找到</span>}
                </div>
                <div className="flex justify-between">
                  <span>Supabase Key:</span>
-                 {envs.supabaseKey ? <span className="text-green-600 font-mono">✅ 已注入</span> : <span className="text-red-500 font-mono">❌ 未找到</span>}
+                 {envStatus.hasKey ? <span className="text-green-600 font-mono">✅ 已获取</span> : <span className="text-red-500 font-mono">❌ 未找到</span>}
                </div>
                <div className="text-[10px] text-tea-400 mt-1 border-t border-stone-200 pt-1">
-                 如果此处显示❌，请在 Vercel 检查变量名并重新部署 (Redeploy)。
+                 系统正在尝试从 /api/env 读取配置。如果失败，请检查是否已在 Vercel 重新部署。
                </div>
              </div>
-             
-             {/* Deep Debug Panel */}
-             {showDebug && (
-               <div className="mt-3 p-2 bg-stone-100 rounded text-[10px] font-mono text-stone-600 break-all border border-stone-200">
-                 <div className="flex items-center gap-1 font-bold mb-1"><Bug size={10}/> Runtime Info:</div>
-                 <div>Process Defined: {String(debugInfo.processDefined)}</div>
-                 <div>Process.Env Defined: {String(debugInfo.processEnvDefined)}</div>
-                 <div>Import.Meta Defined: {String(debugInfo.importMetaDefined)}</div>
-                 <div className="mt-1 font-bold">Process.Env Check:</div>
-                 <div>{JSON.stringify(debugInfo.raw.process, null, 2)}</div>
-                 <div className="mt-1 font-bold">Import.Meta Check:</div>
-                 <div>{JSON.stringify(debugInfo.raw.importMeta, null, 2)}</div>
-               </div>
-             )}
           </div>
 
           {/* Supabase Config */}
@@ -833,7 +806,7 @@ const SettingsModal = ({ isOpen, onClose, config, onSave }: any) => {
         </div>
 
         <div className="flex justify-between items-center pt-4 border-t border-tea-50">
-           <Button variant="ghost" onClick={handleResetToEnv} className="!px-2 text-tea-400 hover:text-tea-600">
+           <Button variant="ghost" onClick={handleResetToEnv} className="!px-2 text-tea-400 hover:text-tea-600" disabled={!serverConfig}>
               <RotateCcw size={14} className="mr-1"/> 重置为系统变量
            </Button>
            <div className="flex gap-3">
