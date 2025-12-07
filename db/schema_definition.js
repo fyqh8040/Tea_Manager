@@ -17,6 +17,10 @@ create table if not exists public.tea_items (
   created_at bigint default (extract(epoch from now()) * 1000)::bigint
 );
 
+-- 补丁: 针对旧版本数据库，强制检查并补充缺失字段 (Schema Migration)
+alter table public.tea_items add column if not exists quantity integer default 1;
+alter table public.tea_items add column if not exists created_at bigint default (extract(epoch from now()) * 1000)::bigint;
+
 -- 2. 设置 tea_items 权限
 alter table public.tea_items enable row level security;
 drop policy if exists "Public Access Tea Items" on public.tea_items;
