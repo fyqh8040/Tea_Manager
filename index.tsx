@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
@@ -38,7 +39,8 @@ import {
   Zap,
   ChevronDown,
   ChevronUp,
-  Cloud
+  Cloud,
+  Scale
 } from 'lucide-react';
 
 // --- Types ---
@@ -54,7 +56,8 @@ interface TeaItem {
   origin?: string;
   description?: string;
   image_url?: string;
-  quantity: number; // Added quantity
+  quantity: number; 
+  unit: string; // Added unit
   created_at: number;
 }
 
@@ -73,8 +76,13 @@ interface AppConfig {
   supabaseKey: string;
   imageApiUrl: string;
   imageApiToken: string;
-  hasServerDb?: boolean; // New flag for server-side DB mode
+  hasServerDb?: boolean; 
 }
+
+// --- Constants ---
+
+const TEA_UNITS = ['克 (g)', '千克 (kg)', '饼', '砖', '沱', '盒', '罐', '袋', '泡'];
+const TEAWARE_UNITS = ['件', '套', '个', '把', '只', '组'];
 
 // --- Components ---
 
@@ -179,7 +187,7 @@ const App = () => {
           
           // Auto-inject and update server capability
           setConfig(prev => {
-            const newConfig = { ...prev, hasServerDb: envData.hasServerDb }; // Always update server DB status
+            const newConfig = { ...prev, hasServerDb: envData.hasServerDb }; 
             let changed = prev.hasServerDb !== envData.hasServerDb;
             
             if (!newConfig.supabaseUrl && envData.supabaseUrl) {
@@ -226,7 +234,7 @@ const App = () => {
     return null;
   }, [config.supabaseUrl, config.supabaseKey]);
 
-  // Derived state: Is System Connected? (Either via Supabase Client or Server DB)
+  // Derived state: Is System Connected?
   const isConnected = !!supabase || !!config.hasServerDb;
 
   // Data States
@@ -243,12 +251,22 @@ const App = () => {
   const [isDbInitOpen, setIsDbInitOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<TeaItem | null>(null);
 
+  // Dynamic Greeting Logic
+  const greeting = useMemo(() => {
+    const hour = new Date().getHours();
+    if (hour < 5) return '夜深了';
+    if (hour < 11) return '早安';
+    if (hour < 13) return '午安';
+    if (hour < 18) return '午后好';
+    return '晚上好';
+  }, []);
+
   // Persist config changes
   useEffect(() => {
     localStorage.setItem('tea_app_config', JSON.stringify(config));
   }, [config]);
 
-  // Load Data (Hybrid Strategy)
+  // Load Data
   const fetchItems = async () => {
     if (!isConnected) {
       setIsLoading(false);
@@ -263,7 +281,6 @@ const App = () => {
       let error: any = null;
 
       if (supabase) {
-        // Mode A: Client-side Supabase
         const result = await supabase
           .from('tea_items')
           .select('*')
@@ -271,7 +288,6 @@ const App = () => {
         data = result.data as TeaItem[] || [];
         error = result.error;
       } else if (config.hasServerDb) {
-        // Mode B: Server-side Proxy
         const res = await fetch('/api/data');
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || 'Server error');
@@ -279,7 +295,6 @@ const App = () => {
       }
 
       if (error) {
-          // Detect missing table error
           if (error.code === '42P01' || error.message.includes('relation "tea_items" does not exist')) { 
               setDbError('TABLE_MISSING');
               setIsDbInitOpen(true);
@@ -302,7 +317,7 @@ const App = () => {
 
   useEffect(() => {
     fetchItems();
-  }, [supabase, config.hasServerDb]); // Re-fetch when connection mode changes
+  }, [supabase, config.hasServerDb]); 
 
   // Filter Logic
   useEffect(() => {
@@ -321,7 +336,7 @@ const App = () => {
     setFilteredItems(result);
   }, [items, filterType, searchQuery]);
 
-  // Handle Delete (Hybrid)
+  // Handle Delete
   const handleDelete = async (id: string) => {
     if (!confirm('确认删除这件藏品吗？\n删除后相关的库存历史也将一并删除。')) return;
     
@@ -347,7 +362,7 @@ const App = () => {
     }
   };
 
-  // Handle Save (Hybrid)
+  // Handle Save
   const handleSave = async (item: Partial<TeaItem>) => {
     const itemData = {
       name: item.name,
@@ -358,6 +373,7 @@ const App = () => {
       description: item.description,
       image_url: item.image_url,
       quantity: item.quantity ?? 1, 
+      unit: item.unit || '件',
       ...(item.id ? {} : { created_at: Date.now() }) 
     };
 
@@ -385,8 +401,7 @@ const App = () => {
                     .single();
                 if (error) throw error;
                 savedData = data;
-                // Initial log handled by frontend for Supabase mode (or trigger in DB)
-                // For consistency with old code, we do it here if using client
+                
                 if (savedData && savedData.quantity > 0) {
                     await supabase.from('inventory_logs').insert([{
                         item_id: savedData.id,
@@ -437,14 +452,14 @@ const App = () => {
     }
   };
 
-  // Stock Update (Hybrid)
+  // Stock Update
   const handleStockUpdate = async (id: string, newQuantity: number, changeAmount: number, reason: string, note: string) => {
     if (!isConnected) return;
     try {
       let updatedItem: TeaItem | null = null;
 
       if (supabase) {
-          // Mode A: Supabase (Client transaction simulation)
+          // Mode A: Supabase 
           const { error: logError } = await supabase.from('inventory_logs').insert([{
             item_id: id,
             change_amount: changeAmount,
@@ -464,7 +479,7 @@ const App = () => {
           updatedItem = data as TeaItem;
 
       } else if (config.hasServerDb) {
-          // Mode B: Server API (Atomic Transaction)
+          // Mode B: Server API
           const res = await fetch('/api/data', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -530,7 +545,7 @@ const App = () => {
         {/* Header */}
         <header className="mb-8">
           <h1 className="font-serif text-3xl md:text-4xl text-tea-900 mb-4">
-            {new Date().getHours() < 12 ? '早安' : '午安'}，藏家
+            {greeting}，藏家
           </h1>
           <p className="text-tea-500 max-w-xl leading-relaxed">
             {!isConnected
@@ -624,9 +639,8 @@ const App = () => {
                   <p className="text-white text-sm font-medium">点击查看详情</p>
                 </div>
                 <div className="absolute top-3 right-3 flex gap-2">
-                   {/* Quantity Badge */}
                    <Badge color="tea">
-                      x{item.quantity ?? 0}
+                      {item.quantity} {item.unit || '件'}
                    </Badge>
                   <Badge color={item.type === 'TEA' ? 'accent' : 'clay'}>
                     {item.type === 'TEA' ? '茶' : '器'}
@@ -845,7 +859,8 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, onStockUpdate, con
     origin: '',
     description: '',
     image_url: '',
-    quantity: 1
+    quantity: 1,
+    unit: '克 (g)' // Default for tea
   });
   
   const [isUploading, setIsUploading] = useState(false);
@@ -869,12 +884,24 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, onStockUpdate, con
         origin: '',
         description: '',
         image_url: '',
-        quantity: 1
+        quantity: 1,
+        unit: '克 (g)'
       });
       setActiveTab('DETAILS');
       setLogs([]);
     }
   }, [item]);
+
+  // Auto-switch default unit when type changes
+  useEffect(() => {
+    if (!item) { // Only when creating new
+        if (formData.type === 'TEA' && !TEA_UNITS.includes(formData.unit || '')) {
+            setFormData(prev => ({...prev, unit: '克 (g)'}));
+        } else if (formData.type === 'TEAWARE' && !TEAWARE_UNITS.includes(formData.unit || '')) {
+            setFormData(prev => ({...prev, unit: '件'}));
+        }
+    }
+  }, [formData.type]);
 
   const fetchLogs = async (itemId: string) => {
     setIsLoadingLogs(true);
@@ -1037,25 +1064,68 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, onStockUpdate, con
                             <div className="space-y-4">
                                 <Input label="名称" value={formData.name} onChange={(e: any) => setFormData({...formData, name: e.target.value})} placeholder="藏品名称" required />
                                 <div className="grid grid-cols-2 gap-4">
-                                    <Input label="分类" value={formData.category} onChange={(e: any) => setFormData({...formData, category: e.target.value})} required />
+                                    <Input label="分类" value={formData.category} onChange={(e: any) => setFormData({...formData, category: e.target.value})} required placeholder={formData.type === 'TEA' ? '如：普洱、红茶' : '如：紫砂壶、盖碗'}/>
                                     <Input label="年份" value={formData.year} onChange={(e: any) => setFormData({...formData, year: e.target.value})} />
                                 </div>
                                 <div className="grid grid-cols-2 gap-4">
                                      <Input label="产地 / 来源" value={formData.origin} onChange={(e: any) => setFormData({...formData, origin: e.target.value})} />
+                                     
+                                     {/* Inventory Input Group */}
                                      {/* Only show initial quantity input if creating new */}
                                      {!item && (
-                                         <Input label="初始数量" type="number" min="1" value={formData.quantity} onChange={(e: any) => setFormData({...formData, quantity: parseInt(e.target.value) || 0})} />
+                                         <div className="space-y-1.5">
+                                            <label className="text-xs font-semibold text-tea-500 uppercase tracking-wider">初始数量 & 单位</label>
+                                            <div className="flex gap-2">
+                                                <input 
+                                                    type="number" 
+                                                    min="0.01" 
+                                                    step="0.01"
+                                                    className="w-1/2 px-3 py-2 bg-white/50 border border-tea-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-accent/50 text-tea-800"
+                                                    value={formData.quantity} 
+                                                    onChange={(e: any) => setFormData({...formData, quantity: parseFloat(e.target.value) || 0})} 
+                                                />
+                                                <select 
+                                                    className="w-1/2 px-2 py-2 bg-white/50 border border-tea-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-accent/50 text-tea-800 text-sm"
+                                                    value={formData.unit}
+                                                    onChange={(e) => setFormData({...formData, unit: e.target.value})}
+                                                >
+                                                    {(formData.type === 'TEA' ? TEA_UNITS : TEAWARE_UNITS).map(u => (
+                                                        <option key={u} value={u}>{u}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                         </div>
                                      )}
+                                     
                                      {/* If editing, show read-only quantity here */}
                                      {item && (
                                          <div className="space-y-1.5 opacity-60">
                                             <label className="text-xs font-semibold text-tea-500 uppercase tracking-wider">当前库存</label>
                                             <div className="w-full px-3 py-2 bg-tea-50 border border-tea-200 rounded-lg text-tea-800 font-mono">
-                                                {formData.quantity}
+                                                {formData.quantity} <span className="text-tea-500 text-xs ml-1">{formData.unit}</span>
                                             </div>
                                          </div>
                                      )}
                                 </div>
+                                
+                                {/* Unit Editor for Existing Items (In case user wants to fix unit) */}
+                                {item && (
+                                    <div className="space-y-1.5">
+                                       <label className="text-xs font-semibold text-tea-500 uppercase tracking-wider">计量单位</label>
+                                       <div className="flex gap-2">
+                                           <select 
+                                                className="w-full px-3 py-2 bg-white/50 border border-tea-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-accent/50 text-tea-800"
+                                                value={formData.unit}
+                                                onChange={(e) => setFormData({...formData, unit: e.target.value})}
+                                            >
+                                                {(formData.type === 'TEA' ? TEA_UNITS : TEAWARE_UNITS).map(u => (
+                                                    <option key={u} value={u}>{u}</option>
+                                                ))}
+                                            </select>
+                                       </div>
+                                    </div>
+                                )}
+
                                 <TextArea label="描述 / 品鉴笔记" value={formData.description} onChange={(e: any) => setFormData({...formData, description: e.target.value})} />
                             </div>
 
@@ -1074,6 +1144,11 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, onStockUpdate, con
                             logs={logs} 
                             isLoading={isLoadingLogs}
                             onUpdate={async (amt: number, reason: string, note: string) => {
+                                // Add check for consumption
+                                if (amt < 0 && (item.quantity + amt) < 0) {
+                                    alert("库存不足，无法出库");
+                                    return false;
+                                }
                                 const success = await onStockUpdate(item.id, (item.quantity || 0) + amt, amt, reason, note);
                                 if (success) {
                                     setFormData(prev => ({...prev, quantity: (prev.quantity || 0) + amt})); // Update local form too
@@ -1094,10 +1169,15 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, onStockUpdate, con
 
 const InventoryManager = ({ item, logs, isLoading, onUpdate }: any) => {
   const [mode, setMode] = useState<'VIEW' | 'IN' | 'OUT'>('VIEW');
-  const [amount, setAmount] = useState<number>(1);
+  const [amount, setAmount] = useState<number>(0);
   const [reason, setReason] = useState<string>('');
   const [note, setNote] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Reset amount when mode changes, or default to 1 for convenience
+  useEffect(() => {
+    setAmount(item.type === 'TEA' ? 0 : 1);
+  }, [mode, item.type]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1111,7 +1191,7 @@ const InventoryManager = ({ item, logs, isLoading, onUpdate }: any) => {
     const success = await onUpdate(finalAmount, finalReason, note);
     if (success) {
       setMode('VIEW');
-      setAmount(1);
+      setAmount(0);
       setReason('');
       setNote('');
     }
@@ -1125,7 +1205,7 @@ const InventoryManager = ({ item, logs, isLoading, onUpdate }: any) => {
       { value: 'ADJUST', label: '盘盈调整' },
     ],
     OUT: [
-      { value: 'CONSUME', label: '日常消耗' },
+      { value: 'CONSUME', label: '品饮/使用' },
       { value: 'GIFT', label: '赠友' },
       { value: 'DAMAGE', label: '损耗/遗失' },
       { value: 'ADJUST', label: '盘亏调整' },
@@ -1166,13 +1246,14 @@ const InventoryManager = ({ item, logs, isLoading, onUpdate }: any) => {
             
             <div className="space-y-4">
                <div className="flex gap-4">
-                  <div className="w-1/3">
+                  <div className="w-1/2">
                     <Input 
-                      label="数量" 
+                      label={`数量 (${item.unit})`} 
                       type="number" 
-                      min="1" 
-                      value={amount} 
-                      onChange={(e: any) => setAmount(parseInt(e.target.value) || 0)} 
+                      min="0.001" 
+                      step="0.001"
+                      value={amount || ''} 
+                      onChange={(e: any) => setAmount(parseFloat(e.target.value) || 0)} 
                       required
                     />
                   </div>
@@ -1188,6 +1269,23 @@ const InventoryManager = ({ item, logs, isLoading, onUpdate }: any) => {
                      </select>
                   </div>
                </div>
+               
+               {/* Quick Select Chips for Tea Consumption */}
+               {mode === 'OUT' && item.type === 'TEA' && (
+                   <div className="flex gap-2">
+                       {[7, 8, 10].map(g => (
+                           <button 
+                            key={g} 
+                            type="button" 
+                            onClick={() => setAmount(g)}
+                            className="text-xs bg-tea-50 text-tea-600 px-2 py-1 rounded hover:bg-tea-100 transition-colors"
+                           >
+                               {g}g (一泡)
+                           </button>
+                       ))}
+                   </div>
+               )}
+
                <Input 
                   label="备注说明 (可选)" 
                   placeholder="例如：2024春茶采购..." 
@@ -1229,12 +1327,12 @@ const InventoryManager = ({ item, logs, isLoading, onUpdate }: any) => {
                            {formatReason(log.reason)}
                          </span>
                          <span className={`font-mono font-bold text-sm ${log.change_amount > 0 ? 'text-green-600' : 'text-orange-600'}`}>
-                           {log.change_amount > 0 ? '+' : ''}{log.change_amount}
+                           {log.change_amount > 0 ? '+' : ''}{Number(log.change_amount)} <span className="text-[10px] text-tea-400 font-normal">{item.unit}</span>
                          </span>
                       </div>
                       {log.note && <p className="text-xs text-tea-500 mt-1">{log.note}</p>}
                       <div className="flex justify-between mt-2 pt-2 border-t border-tea-50/50 text-[10px] text-tea-300">
-                         <span>结余: {log.current_balance}</span>
+                         <span>结余: {Number(log.current_balance)} {item.unit}</span>
                          <span>{new Date(log.created_at).toLocaleString()}</span>
                       </div>
                    </div>
@@ -1250,7 +1348,7 @@ const InventoryManager = ({ item, logs, isLoading, onUpdate }: any) => {
 const formatReason = (r: string) => {
   const map: Record<string, string> = {
     'PURCHASE': '采购入库',
-    'CONSUME': '品饮消耗',
+    'CONSUME': '品饮/使用',
     'GIFT': '赠送亲友',
     'DAMAGE': '损耗/遗失',
     'ADJUST': '库存盘点',
