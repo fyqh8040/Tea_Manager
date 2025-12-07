@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
@@ -1481,4 +1482,5 @@ const InventoryManager = ({ item, logs, isLoading, onUpdate }: any) => {
     );
 };
 
-export default App;
+const root = createRoot(document.getElementById('root')!);
+root.render(<App />);
