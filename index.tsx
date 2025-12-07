@@ -37,7 +37,8 @@ import {
   Play,
   Zap,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Cloud
 } from 'lucide-react';
 
 // --- Types ---
@@ -72,6 +73,7 @@ interface AppConfig {
   supabaseKey: string;
   imageApiUrl: string;
   imageApiToken: string;
+  hasServerDb?: boolean; // New flag for server-side DB mode
 }
 
 // --- Components ---
@@ -134,7 +136,8 @@ const Badge = ({ children, color = 'tea' }: any) => {
     accent: "bg-accent-light/30 text-accent-dark",
     clay: "bg-orange-100 text-orange-800",
     red: "bg-red-100 text-red-700",
-    green: "bg-green-100 text-green-700"
+    green: "bg-green-100 text-green-700",
+    blue: "bg-blue-100 text-blue-700"
   };
   return (
     <span className={`px-2 py-0.5 rounded text-xs font-medium ${colors[color as keyof typeof colors]}`}>
@@ -156,7 +159,8 @@ const App = () => {
       supabaseUrl: '',
       supabaseKey: '',
       imageApiUrl: 'https://cfbed.sanyue.de/api/upload',
-      imageApiToken: ''
+      imageApiToken: '',
+      hasServerDb: false
     };
   });
 
@@ -173,10 +177,10 @@ const App = () => {
           const envData = await res.json();
           setServerConfig(envData);
           
-          // Auto-inject if local config is empty or matches defaults
+          // Auto-inject and update server capability
           setConfig(prev => {
-            const newConfig = { ...prev };
-            let changed = false;
+            const newConfig = { ...prev, hasServerDb: envData.hasServerDb }; // Always update server DB status
+            let changed = prev.hasServerDb !== envData.hasServerDb;
             
             if (!newConfig.supabaseUrl && envData.supabaseUrl) {
               newConfig.supabaseUrl = envData.supabaseUrl;
@@ -208,7 +212,7 @@ const App = () => {
     fetchEnv();
   }, []);
 
-  // Supabase Client Instance
+  // Supabase Client Instance (Client-side)
   const supabase = useMemo(() => {
     if (config.supabaseUrl && config.supabaseKey) {
       try {
@@ -222,18 +226,21 @@ const App = () => {
     return null;
   }, [config.supabaseUrl, config.supabaseKey]);
 
+  // Derived state: Is System Connected? (Either via Supabase Client or Server DB)
+  const isConnected = !!supabase || !!config.hasServerDb;
+
   // Data States
   const [items, setItems] = useState<TeaItem[]>([]);
   const [filteredItems, setFilteredItems] = useState<TeaItem[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'ALL' | 'TEA' | 'TEAWARE'>('ALL');
   const [isLoading, setIsLoading] = useState(true);
-  const [dbError, setDbError] = useState<string | null>(null); // New state for DB errors
+  const [dbError, setDbError] = useState<string | null>(null); 
   
   // Modal States
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isDbInitOpen, setIsDbInitOpen] = useState(false); // New Modal state
+  const [isDbInitOpen, setIsDbInitOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<TeaItem | null>(null);
 
   // Persist config changes
@@ -241,9 +248,9 @@ const App = () => {
     localStorage.setItem('tea_app_config', JSON.stringify(config));
   }, [config]);
 
-  // Load Data
+  // Load Data (Hybrid Strategy)
   const fetchItems = async () => {
-    if (!supabase) {
+    if (!isConnected) {
       setIsLoading(false);
       return;
     }
@@ -252,14 +259,27 @@ const App = () => {
     setDbError(null);
 
     try {
-      const { data, error } = await supabase
-        .from('tea_items')
-        .select('*')
-        .order('created_at', { ascending: false });
+      let data: TeaItem[] = [];
+      let error: any = null;
+
+      if (supabase) {
+        // Mode A: Client-side Supabase
+        const result = await supabase
+          .from('tea_items')
+          .select('*')
+          .order('created_at', { ascending: false });
+        data = result.data as TeaItem[] || [];
+        error = result.error;
+      } else if (config.hasServerDb) {
+        // Mode B: Server-side Proxy
+        const res = await fetch('/api/data');
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || 'Server error');
+        data = json.data;
+      }
 
       if (error) {
           // Detect missing table error
-          // Supabase/Postgres Error 42P01: undefined_table
           if (error.code === '42P01' || error.message.includes('relation "tea_items" does not exist')) { 
               setDbError('TABLE_MISSING');
               setIsDbInitOpen(true);
@@ -267,11 +287,11 @@ const App = () => {
               throw error;
           }
       } else {
-          if (data) setItems(data as TeaItem[]);
+          setItems(data);
       }
     } catch (error: any) {
       console.error('Error fetching tea items:', error);
-      if (error.message && error.message.includes('relation "tea_items" does not exist')) {
+      if (error.message && (error.message.includes('relation "tea_items" does not exist') || error.message.includes('does not exist'))) {
            setDbError('TABLE_MISSING');
            setIsDbInitOpen(true);
       }
@@ -282,7 +302,7 @@ const App = () => {
 
   useEffect(() => {
     fetchItems();
-  }, [supabase]);
+  }, [supabase, config.hasServerDb]); // Re-fetch when connection mode changes
 
   // Filter Logic
   useEffect(() => {
@@ -301,6 +321,7 @@ const App = () => {
     setFilteredItems(result);
   }, [items, filterType, searchQuery]);
 
+  // Handle Delete (Hybrid)
   const handleDelete = async (id: string) => {
     if (!confirm('确认删除这件藏品吗？\n删除后相关的库存历史也将一并删除。')) return;
     
@@ -308,16 +329,25 @@ const App = () => {
     setItems(prev => prev.filter(i => i.id !== id));
     if (editingItem?.id === id) setIsModalOpen(false);
 
-    if (supabase) {
-      const { error } = await supabase.from('tea_items').delete().eq('id', id);
-      if (error) {
+    try {
+        if (supabase) {
+            const { error } = await supabase.from('tea_items').delete().eq('id', id);
+            if (error) throw error;
+        } else if (config.hasServerDb) {
+            await fetch('/api/data', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'delete', id })
+            });
+        }
+    } catch (error) {
         console.error('Delete failed:', error);
         alert('删除失败，数据已恢复');
         setItems(previousItems);
-      }
     }
   };
 
+  // Handle Save (Hybrid)
   const handleSave = async (item: Partial<TeaItem>) => {
     const itemData = {
       name: item.name,
@@ -327,45 +357,61 @@ const App = () => {
       origin: item.origin,
       description: item.description,
       image_url: item.image_url,
-      quantity: item.quantity ?? 1, // Default quantity
+      quantity: item.quantity ?? 1, 
       ...(item.id ? {} : { created_at: Date.now() }) 
     };
 
     try {
-        if (!supabase) throw new Error("数据库未连接");
+        if (!isConnected) throw new Error("数据库未连接");
 
         let savedData: TeaItem | null = null;
 
-        if (item.id) {
-            const { data, error } = await supabase
-                .from('tea_items')
-                .update(itemData)
-                .eq('id', item.id)
-                .select()
-                .single();
-            if (error) throw error;
-            savedData = data;
-        } else {
-            // Insert new
-            const { data, error } = await supabase
-                .from('tea_items')
-                .insert([itemData])
-                .select()
-                .single();
-            if (error) throw error;
-            savedData = data;
-            
-            // Log initial inventory for new items
-            if (savedData && savedData.quantity > 0) {
-               await supabase.from('inventory_logs').insert([{
-                 item_id: savedData.id,
-                 change_amount: savedData.quantity,
-                 current_balance: savedData.quantity,
-                 reason: 'INITIAL',
-                 note: '初始入库',
-                 created_at: Date.now()
-               }]);
+        if (supabase) {
+            // Mode A: Supabase Client
+            if (item.id) {
+                const { data, error } = await supabase
+                    .from('tea_items')
+                    .update(itemData)
+                    .eq('id', item.id)
+                    .select()
+                    .single();
+                if (error) throw error;
+                savedData = data;
+            } else {
+                const { data, error } = await supabase
+                    .from('tea_items')
+                    .insert([itemData])
+                    .select()
+                    .single();
+                if (error) throw error;
+                savedData = data;
+                // Initial log handled by frontend for Supabase mode (or trigger in DB)
+                // For consistency with old code, we do it here if using client
+                if (savedData && savedData.quantity > 0) {
+                    await supabase.from('inventory_logs').insert([{
+                        item_id: savedData.id,
+                        change_amount: savedData.quantity,
+                        current_balance: savedData.quantity,
+                        reason: 'INITIAL',
+                        note: '初始入库',
+                        created_at: Date.now()
+                    }]);
+                }
             }
+        } else if (config.hasServerDb) {
+            // Mode B: Server API
+            const res = await fetch('/api/data', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: item.id ? 'update' : 'create',
+                    id: item.id,
+                    data: itemData
+                })
+            });
+            const json = await res.json();
+            if (!res.ok) throw new Error(json.error);
+            savedData = json.data;
         }
 
         if (savedData) {
@@ -382,7 +428,7 @@ const App = () => {
 
     } catch (e: any) {
         console.error("Save error:", e);
-        if (e.code === '42P01') {
+        if (e.code === '42P01' || (e.message && e.message.includes('does not exist'))) {
              setDbError('TABLE_MISSING');
              setIsDbInitOpen(true);
         } else {
@@ -391,41 +437,62 @@ const App = () => {
     }
   };
 
-  // Dedicated Stock Update Handler
+  // Stock Update (Hybrid)
   const handleStockUpdate = async (id: string, newQuantity: number, changeAmount: number, reason: string, note: string) => {
-    if (!supabase) return;
+    if (!isConnected) return;
     try {
-      // 1. Update Log
-      const { error: logError } = await supabase.from('inventory_logs').insert([{
-        item_id: id,
-        change_amount: changeAmount,
-        current_balance: newQuantity,
-        reason: reason,
-        note: note,
-        created_at: Date.now()
-      }]);
-      if (logError) throw logError;
+      let updatedItem: TeaItem | null = null;
 
-      // 2. Update Item
-      const { data, error: itemError } = await supabase.from('tea_items')
-        .update({ quantity: newQuantity })
-        .eq('id', id)
-        .select()
-        .single();
-      if (itemError) throw itemError;
+      if (supabase) {
+          // Mode A: Supabase (Client transaction simulation)
+          const { error: logError } = await supabase.from('inventory_logs').insert([{
+            item_id: id,
+            change_amount: changeAmount,
+            current_balance: newQuantity,
+            reason: reason,
+            note: note,
+            created_at: Date.now()
+          }]);
+          if (logError) throw logError;
 
-      // 3. Update Local State
-      if (data) {
-        setItems(prev => prev.map(i => i.id === id ? data as TeaItem : i));
-        // Also update editing item to reflect changes immediately in modal
-        setEditingItem(data as TeaItem);
+          const { data, error: itemError } = await supabase.from('tea_items')
+            .update({ quantity: newQuantity })
+            .eq('id', id)
+            .select()
+            .single();
+          if (itemError) throw itemError;
+          updatedItem = data as TeaItem;
+
+      } else if (config.hasServerDb) {
+          // Mode B: Server API (Atomic Transaction)
+          const res = await fetch('/api/data', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                  action: 'stock_update',
+                  id,
+                  newQuantity,
+                  changeAmount,
+                  reason,
+                  note
+              })
+          });
+          const json = await res.json();
+          if (!res.ok) throw new Error(json.error);
+          updatedItem = json.data;
       }
-      return true;
+
+      if (updatedItem) {
+        setItems(prev => prev.map(i => i.id === id ? updatedItem! : i));
+        setEditingItem(updatedItem);
+        return true;
+      }
     } catch (e) {
       console.error("Stock update failed", e);
       alert("库存更新失败，请重试");
       return false;
     }
+    return false;
   };
 
   return (
@@ -442,10 +509,14 @@ const App = () => {
           
           <div className="flex items-center gap-2">
             <Button variant="ghost" className="!px-2" onClick={() => setIsSettingsOpen(true)}>
-              {supabase ? <div className="w-2 h-2 rounded-full bg-green-500 mr-2 shadow-[0_0_8px_rgba(34,197,94,0.5)]"></div> : <div className="w-2 h-2 rounded-full bg-red-400 mr-2 animate-pulse"></div>}
+              {isConnected ? (
+                  <div className={`w-2 h-2 rounded-full mr-2 shadow-[0_0_8px_rgba(34,197,94,0.5)] ${config.hasServerDb && !supabase ? 'bg-blue-500' : 'bg-green-500'}`}></div>
+              ) : (
+                  <div className="w-2 h-2 rounded-full bg-red-400 mr-2 animate-pulse"></div>
+              )}
               <Settings size={20} />
             </Button>
-            <Button onClick={() => { setEditingItem(null); setIsModalOpen(true); }} disabled={!supabase || !!dbError}>
+            <Button onClick={() => { setEditingItem(null); setIsModalOpen(true); }} disabled={!isConnected || !!dbError}>
               <Plus size={18} />
               <span className="hidden sm:inline">记一笔</span>
             </Button>
@@ -462,8 +533,8 @@ const App = () => {
             {new Date().getHours() < 12 ? '早安' : '午安'}，藏家
           </h1>
           <p className="text-tea-500 max-w-xl leading-relaxed">
-            {!supabase 
-              ? "系统未连接到云端。请点击右上角设置图标，配置 Supabase 连接信息。" 
+            {!isConnected
+              ? "系统未连接到云端。请点击右上角设置图标，配置数据库连接。" 
               : dbError === 'TABLE_MISSING' 
                 ? <span className="text-red-500 flex items-center gap-2 font-medium bg-red-50 px-2 py-0.5 rounded-md inline-block mt-1"><AlertTriangle size={16}/> 数据库尚未初始化</span>
                 : `目前云端共收录 ${items.length} 件藏品。每一片叶子都有它的故事。`
@@ -519,8 +590,8 @@ const App = () => {
               </div>
               <h3 className="text-xl font-bold text-red-700 mb-2 font-serif">数据库未初始化</h3>
               <p className="text-tea-600 mb-6 max-w-lg mx-auto leading-relaxed">
-                您的 Vercel 部署已成功，但 Supabase 数据库中还缺少必要的表结构。
-                <br/>您可以选择使用连接字符串一键修复，或手动复制 SQL 执行。
+                您的 Vercel 部署已成功，但数据库中还缺少必要的表结构。
+                <br/>您可以选择使用连接字符串一键修复。
               </p>
               <Button onClick={() => setIsDbInitOpen(true)} className="mx-auto" variant="danger">
                  <Terminal size={18}/> 打开初始化向导
@@ -586,7 +657,7 @@ const App = () => {
               <div className="mx-auto w-16 h-16 bg-tea-100 rounded-full flex items-center justify-center mb-4">
                 <Database size={24} className="text-tea-400" />
               </div>
-              <p>暂无数据。{supabase ? "快点击右上角添加第一款藏品吧。" : "请在设置中配置 Supabase 连接。"}</p>
+              <p>暂无数据。{isConnected ? "快点击右上角添加第一款藏品吧。" : "请在设置中配置 Supabase 连接。"}</p>
             </div>
           )}
         </div>
@@ -677,7 +748,7 @@ const DbInitModal = ({ isOpen, onClose }: any) => {
                         <h3 className="font-serif text-xl font-bold text-tea-900 flex items-center gap-2">
                              <Terminal className="text-accent" /> 数据库初始化向导
                         </h3>
-                        <p className="text-sm text-tea-500 mt-1">检测到 Supabase 缺失表结构，请选择初始化方式。</p>
+                        <p className="text-sm text-tea-500 mt-1">检测到数据库缺失表结构，请选择初始化方式。</p>
                      </div>
                      <button onClick={onClose}><X size={20} className="text-tea-400" /></button>
                 </div>
@@ -806,14 +877,24 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, onStockUpdate, con
   }, [item]);
 
   const fetchLogs = async (itemId: string) => {
-    if (!supabase) return;
     setIsLoadingLogs(true);
-    const { data } = await supabase.from('inventory_logs')
-      .select('*')
-      .eq('item_id', itemId)
-      .order('created_at', { ascending: false });
-    if (data) setLogs(data);
-    setIsLoadingLogs(false);
+    try {
+        if (supabase) {
+            const { data } = await supabase.from('inventory_logs')
+            .select('*')
+            .eq('item_id', itemId)
+            .order('created_at', { ascending: false });
+            if (data) setLogs(data);
+        } else if (config.hasServerDb) {
+            const res = await fetch(`/api/data?action=get_logs&id=${itemId}`);
+            const json = await res.json();
+            if (json.data) setLogs(json.data);
+        }
+    } catch (e) {
+        console.error("Fetch logs error", e);
+    } finally {
+        setIsLoadingLogs(false);
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -1205,36 +1286,55 @@ const SettingsModal = ({ isOpen, onClose, config, serverConfig, isEnvLoading, on
         </div>
 
         <div className="space-y-6">
-          {/* Supabase Config */}
-          <div className="space-y-4">
-            <h4 className="font-bold text-sm text-tea-800 uppercase tracking-wider border-b border-tea-100 pb-2">数据库连接 (Supabase)</h4>
-            
-            <Input 
-              label="Project URL" 
-              value={localConfig.supabaseUrl} 
-              onChange={(e: any) => setLocalConfig({...localConfig, supabaseUrl: e.target.value})}
-              placeholder="https://xxx.supabase.co"
-              rightLabel={serverConfig?.supabaseUrl ? <Badge color="green">已检测到环境变量</Badge> : null}
-            />
-            
-            <div className="relative">
-               <Input 
-                  label="Anon Key" 
-                  type={showSecrets ? "text" : "password"}
-                  value={localConfig.supabaseKey} 
-                  onChange={(e: any) => setLocalConfig({...localConfig, supabaseKey: e.target.value})}
-                  placeholder="eyJhbGciOiJIUzI1NiIsInR..."
-                  rightLabel={serverConfig?.supabaseKey ? <Badge color="green">已检测到环境变量</Badge> : null}
-               />
-               <button 
-                type="button"
-                onClick={() => setShowSecrets(!showSecrets)}
-                className="absolute right-3 top-[29px] text-tea-400 hover:text-tea-600"
-               >
-                 {showSecrets ? <AlertCircle size={16}/> : <Key size={16}/>}
-               </button>
+          
+          {/* Connection Status Banner */}
+          {config.hasServerDb && !config.supabaseKey && (
+              <div className="bg-blue-50 border border-blue-100 rounded-lg p-4 flex items-start gap-3">
+                  <div className="bg-blue-200 text-blue-700 rounded-full w-8 h-8 flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <Cloud size={18} />
+                  </div>
+                  <div>
+                      <h4 className="font-bold text-blue-800 text-sm">服务端托管模式</h4>
+                      <p className="text-xs text-blue-600 mt-1 leading-relaxed">
+                          检测到服务器已配置数据库连接字符串 (DATABASE_URL)。<br/>
+                          系统将自动通过后端 API 进行数据读写，无需在此处配置敏感信息。
+                      </p>
+                  </div>
+              </div>
+          )}
+
+          {/* Supabase Config (Hidden if Server Mode is active and no local overrides) */}
+          {(!config.hasServerDb || config.supabaseKey) && (
+            <div className="space-y-4">
+                <h4 className="font-bold text-sm text-tea-800 uppercase tracking-wider border-b border-tea-100 pb-2">客户端数据库连接 (Supabase)</h4>
+                
+                <Input 
+                label="Project URL" 
+                value={localConfig.supabaseUrl} 
+                onChange={(e: any) => setLocalConfig({...localConfig, supabaseUrl: e.target.value})}
+                placeholder="https://xxx.supabase.co"
+                rightLabel={serverConfig?.supabaseUrl ? <Badge color="green">已检测到环境变量</Badge> : null}
+                />
+                
+                <div className="relative">
+                <Input 
+                    label="Anon Key" 
+                    type={showSecrets ? "text" : "password"}
+                    value={localConfig.supabaseKey} 
+                    onChange={(e: any) => setLocalConfig({...localConfig, supabaseKey: e.target.value})}
+                    placeholder="eyJhbGciOiJIUzI1NiIsInR..."
+                    rightLabel={serverConfig?.supabaseKey ? <Badge color="green">已检测到环境变量</Badge> : null}
+                />
+                <button 
+                    type="button"
+                    onClick={() => setShowSecrets(!showSecrets)}
+                    className="absolute right-3 top-[29px] text-tea-400 hover:text-tea-600"
+                >
+                    {showSecrets ? <AlertCircle size={16}/> : <Key size={16}/>}
+                </button>
+                </div>
             </div>
-          </div>
+          )}
 
           {/* Image API Config */}
           <div className="space-y-4">
@@ -1256,8 +1356,8 @@ const SettingsModal = ({ isOpen, onClose, config, serverConfig, isEnvLoading, on
 
           <div className="bg-tea-50 p-3 rounded text-xs text-tea-500 leading-relaxed">
             <p className="font-bold mb-1">提示：</p>
-            配置信息仅保存在当前浏览器的 LocalStorage 中，不会上传到任何服务器。
-            推荐在 Vercel 环境变量中配置 <code className="bg-black/5 px-1 rounded">NEXT_PUBLIC_SUPABASE_URL</code> 等变量以自动加载。
+            配置信息仅保存在当前浏览器的 LocalStorage 中。
+            {config.hasServerDb ? "服务端连接已就绪，您可以放心使用。" : "建议在 Vercel 环境变量中配置连接信息。"}
           </div>
         </div>
 
