@@ -1,6 +1,7 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createRoot } from 'react-dom/client';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { 
   Plus, 
   Search, 
@@ -12,44 +13,23 @@ import {
   Upload, 
   Camera, 
   Leaf, 
-  Coffee,
-  RotateCcw
+  Database,
+  CheckCircle2,
+  AlertCircle,
+  AlertTriangle,
+  Save,
+  RotateCcw,
+  LogOut
 } from 'lucide-react';
-
-// --- Types ---
-
-type ItemType = 'TEA' | 'TEAWARE';
-
-interface TeaItem {
-  id: string;
-  name: string;
-  type: ItemType;
-  category: string;
-  year?: string;
-  origin?: string;
-  description?: string;
-  imageUrl?: string;
-  createdAt: number;
-}
-
-interface ImageConfig {
-  apiUrl: string;
-  apiToken: string;
-}
-
-// --- Constants ---
-const DEFAULT_API_URL = 'https://cfbed.sanyue.de/api/upload';
 
 // --- Helper for Safe Env Access ---
 const getEnv = (key: string): string | undefined => {
-  // 1. Try process.env (Next.js / CRA / Webpack)
   try {
     if (typeof process !== 'undefined' && process.env && process.env[key]) {
       return process.env[key];
     }
   } catch (e) {}
   
-  // 2. Try import.meta.env (Vite)
   try {
     // @ts-ignore
     if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env[key]) {
@@ -61,32 +41,28 @@ const getEnv = (key: string): string | undefined => {
   return undefined;
 };
 
-// --- Mock Data ---
+// --- Types ---
 
-const INITIAL_DATA: TeaItem[] = [
-  {
-    id: '1',
-    name: '2003年 易武正山',
-    type: 'TEA',
-    category: '普洱生茶',
-    year: '2003',
-    origin: '云南西双版纳',
-    description: '汤色金黄明亮，口感醇厚，回甘持久。存放二十年，陈韵初显。',
-    imageUrl: 'https://images.unsplash.com/photo-1597318181409-cf64d0b5d8a2?auto=format&fit=crop&q=80&w=800',
-    createdAt: Date.now(),
-  },
-  {
-    id: '2',
-    name: '顾景舟款 仿古壶',
-    type: 'TEAWARE',
-    category: '紫砂壶',
-    year: '现代',
-    origin: '江苏宜兴',
-    description: '泥料为原矿底槽清，做工精细，出水流畅。',
-    imageUrl: 'https://images.unsplash.com/photo-1578859765790-2e90c6753730?auto=format&fit=crop&q=80&w=800',
-    createdAt: Date.now() - 10000,
-  }
-];
+type ItemType = 'TEA' | 'TEAWARE';
+
+interface TeaItem {
+  id: string; // UUID from DB
+  name: string;
+  type: ItemType;
+  category: string;
+  year?: string;
+  origin?: string;
+  description?: string;
+  image_url?: string;
+  created_at: number;
+}
+
+interface AppConfig {
+  supabaseUrl: string;
+  supabaseKey: string;
+  imageApiUrl: string;
+  imageApiToken: string;
+}
 
 // --- Components ---
 
@@ -115,7 +91,7 @@ const Input = ({ label, ...props }: any) => (
   <div className="space-y-1.5">
     <label className="text-xs font-semibold text-tea-500 uppercase tracking-wider">{label}</label>
     <input 
-      className="w-full px-3 py-2 bg-white/50 border border-tea-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent transition-all text-tea-800 placeholder-tea-300"
+      className="w-full px-3 py-2 bg-white/50 border border-tea-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent transition-all text-tea-800 placeholder-tea-300 disabled:opacity-50 disabled:bg-tea-100/50"
       {...props}
     />
   </div>
@@ -147,68 +123,90 @@ const Badge = ({ children, color = 'tea' }: any) => {
 // --- Main Application ---
 
 const App = () => {
+  // Config State (Priority: LocalStorage > Env Vars)
+  const [config, setConfig] = useState<AppConfig>(() => {
+    const saved = localStorage.getItem('tea_app_config');
+    const envSupabaseUrl = getEnv('NEXT_PUBLIC_SUPABASE_URL') || '';
+    const envSupabaseKey = getEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY') || '';
+    const envImageUrl = getEnv('NEXT_PUBLIC_IMAGE_API_URL') || 'https://cfbed.sanyue.de/api/upload';
+    const envImageToken = getEnv('NEXT_PUBLIC_IMAGE_API_TOKEN') || '';
+
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      // Merge saved config with env defaults if saved values are empty
+      return {
+        supabaseUrl: parsed.supabaseUrl || envSupabaseUrl,
+        supabaseKey: parsed.supabaseKey || envSupabaseKey,
+        imageApiUrl: parsed.imageApiUrl || envImageUrl,
+        imageApiToken: parsed.imageApiToken || envImageToken
+      };
+    }
+
+    return {
+      supabaseUrl: envSupabaseUrl,
+      supabaseKey: envSupabaseKey,
+      imageApiUrl: envImageUrl,
+      imageApiToken: envImageToken
+    };
+  });
+
+  // Supabase Client Instance
+  const supabase = useMemo(() => {
+    if (config.supabaseUrl && config.supabaseKey) {
+      try {
+        return createClient(config.supabaseUrl, config.supabaseKey);
+      } catch (e) {
+        console.error("Invalid Supabase Config", e);
+        return null;
+      }
+    }
+    return null;
+  }, [config.supabaseUrl, config.supabaseKey]);
+
+  // Data States
   const [items, setItems] = useState<TeaItem[]>([]);
   const [filteredItems, setFilteredItems] = useState<TeaItem[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'ALL' | 'TEA' | 'TEAWARE'>('ALL');
+  const [isLoading, setIsLoading] = useState(true);
   
   // Modal States
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<TeaItem | null>(null);
-  
-  // Image Config State
-  const [imageConfig, setImageConfig] = useState<ImageConfig>(() => {
-    // Determine Env Vars
-    const envUrl = getEnv('NEXT_PUBLIC_IMAGE_API_URL');
-    const envToken = getEnv('NEXT_PUBLIC_IMAGE_API_TOKEN');
-    
-    const effectiveDefaultUrl = envUrl || DEFAULT_API_URL;
-    const effectiveDefaultToken = envToken || '';
 
-    // 1. Try LocalStorage
-    const savedConfigStr = localStorage.getItem('tea_image_config');
-    if (savedConfigStr) {
-      const savedConfig = JSON.parse(savedConfigStr);
-      
-      // Intelligent Correction:
-      // If the saved URL is the *old default* AND we now have a *new env var*, 
-      // it means the cache is stale. Ignore cache and use Env Var.
-      if (savedConfig.apiUrl === DEFAULT_API_URL && envUrl && envUrl !== DEFAULT_API_URL) {
-         console.log('Detected stale config. Updating to Environment Variable.');
-         return {
-           apiUrl: envUrl,
-           apiToken: envToken || savedConfig.apiToken
-         };
-      }
-      return savedConfig;
-    }
-
-    // 2. Use Env Vars or Default
-    return {
-      apiUrl: effectiveDefaultUrl,
-      apiToken: effectiveDefaultToken
-    };
-  });
+  // Persist config changes
+  useEffect(() => {
+    localStorage.setItem('tea_app_config', JSON.stringify(config));
+  }, [config]);
 
   // Load Data
-  useEffect(() => {
-    const saved = localStorage.getItem('tea_collection_items');
-    if (saved) {
-      setItems(JSON.parse(saved));
-    } else {
-      setItems(INITIAL_DATA);
+  const fetchItems = async () => {
+    if (!supabase) {
+      setIsLoading(false);
+      return;
     }
-  }, []);
+    
+    setIsLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('tea_items')
+        .select('*')
+        .order('created_at', { ascending: false });
 
-  // Persist Data
-  useEffect(() => {
-    localStorage.setItem('tea_collection_items', JSON.stringify(items));
-  }, [items]);
+      if (error) throw error;
+      if (data) setItems(data as TeaItem[]);
+    } catch (error) {
+      console.error('Error fetching tea items:', error);
+      // Don't alert on initial load if just unconfigured, but do log
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
-    localStorage.setItem('tea_image_config', JSON.stringify(imageConfig));
-  }, [imageConfig]);
+    fetchItems();
+  }, [supabase]);
 
   // Filter Logic
   useEffect(() => {
@@ -227,34 +225,75 @@ const App = () => {
     setFilteredItems(result);
   }, [items, filterType, searchQuery]);
 
-  const handleDelete = (id: string) => {
-    if (confirm('确认删除这件藏品吗？')) {
-      setItems(prev => prev.filter(i => i.id !== id));
-      if (editingItem?.id === id) setIsModalOpen(false);
-    }
-  };
-
-  const handleSave = (item: TeaItem) => {
-    if (items.find(i => i.id === item.id)) {
-      setItems(prev => prev.map(i => i.id === item.id ? item : i));
-    } else {
-      setItems(prev => [item, ...prev]);
-    }
-    setIsModalOpen(false);
-    setEditingItem(null);
-  };
-
-  const handleResetConfig = () => {
-    const envUrl = getEnv('NEXT_PUBLIC_IMAGE_API_URL');
-    const envToken = getEnv('NEXT_PUBLIC_IMAGE_API_TOKEN');
+  const handleDelete = async (id: string) => {
+    if (!confirm('确认删除这件藏品吗？')) return;
     
-    const defaultConfig = {
-      apiUrl: envUrl || DEFAULT_API_URL,
-      apiToken: envToken || ''
+    const previousItems = [...items];
+    setItems(prev => prev.filter(i => i.id !== id));
+    if (editingItem?.id === id) setIsModalOpen(false);
+
+    if (supabase) {
+      const { error } = await supabase.from('tea_items').delete().eq('id', id);
+      if (error) {
+        console.error('Delete failed:', error);
+        alert('删除失败，数据已恢复');
+        setItems(previousItems);
+      }
+    }
+  };
+
+  const handleSave = async (item: Partial<TeaItem>) => {
+    const itemData = {
+      name: item.name,
+      type: item.type,
+      category: item.category,
+      year: item.year,
+      origin: item.origin,
+      description: item.description,
+      image_url: item.image_url,
+      ...(item.id ? {} : { created_at: Date.now() }) 
     };
-    
-    setImageConfig(defaultConfig);
-    return defaultConfig;
+
+    try {
+        if (!supabase) throw new Error("数据库未连接");
+
+        let savedData: TeaItem | null = null;
+
+        if (item.id) {
+            const { data, error } = await supabase
+                .from('tea_items')
+                .update(itemData)
+                .eq('id', item.id)
+                .select()
+                .single();
+            if (error) throw error;
+            savedData = data;
+        } else {
+            const { data, error } = await supabase
+                .from('tea_items')
+                .insert([itemData])
+                .select()
+                .single();
+            if (error) throw error;
+            savedData = data;
+        }
+
+        if (savedData) {
+            setItems(prev => {
+                const exists = prev.find(i => i.id === savedData!.id);
+                if (exists) {
+                    return prev.map(i => i.id === savedData!.id ? savedData! : i);
+                }
+                return [savedData!, ...prev];
+            });
+            setIsModalOpen(false);
+            setEditingItem(null);
+        }
+
+    } catch (e: any) {
+        console.error("Save error:", e);
+        alert(`保存失败: ${e.message}`);
+    }
   };
 
   return (
@@ -271,9 +310,10 @@ const App = () => {
           
           <div className="flex items-center gap-2">
             <Button variant="ghost" className="!px-2" onClick={() => setIsSettingsOpen(true)}>
+              {supabase ? <div className="w-2 h-2 rounded-full bg-green-500 mr-2 shadow-[0_0_8px_rgba(34,197,94,0.5)]"></div> : <div className="w-2 h-2 rounded-full bg-red-400 mr-2 animate-pulse"></div>}
               <Settings size={20} />
             </Button>
-            <Button onClick={() => { setEditingItem(null); setIsModalOpen(true); }}>
+            <Button onClick={() => { setEditingItem(null); setIsModalOpen(true); }} disabled={!supabase}>
               <Plus size={18} />
               <span className="hidden sm:inline">记一笔</span>
             </Button>
@@ -284,13 +324,16 @@ const App = () => {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 pt-24">
         
-        {/* Header / Stats */}
+        {/* Header */}
         <header className="mb-8">
           <h1 className="font-serif text-3xl md:text-4xl text-tea-900 mb-4">
             {new Date().getHours() < 12 ? '早安' : '午安'}，藏家
           </h1>
           <p className="text-tea-500 max-w-xl leading-relaxed">
-            目前共收录 {items.length} 件藏品。每一片叶子都有它的故事，每一把壶都记录着时光的温度。
+            {!supabase 
+              ? "系统未连接到云端。请点击右上角设置图标，配置 Supabase 连接信息。" 
+              : `目前云端共收录 ${items.length} 件藏品。每一片叶子都有它的故事。`
+            }
           </p>
         </header>
 
@@ -327,7 +370,15 @@ const App = () => {
           </div>
         </div>
 
+        {/* Loading State */}
+        {isLoading && (
+            <div className="flex justify-center py-20">
+                <Loader2 className="animate-spin text-tea-400" size={32} />
+            </div>
+        )}
+
         {/* Grid */}
+        {!isLoading && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {filteredItems.map(item => (
             <div 
@@ -336,9 +387,9 @@ const App = () => {
               className="group bg-white rounded-xl overflow-hidden shadow-sm hover:shadow-xl transition-all duration-300 cursor-pointer border border-tea-100 flex flex-col h-full"
             >
               <div className="relative aspect-[4/3] bg-tea-100 overflow-hidden">
-                {item.imageUrl ? (
+                {item.image_url ? (
                   <img 
-                    src={item.imageUrl} 
+                    src={item.image_url} 
                     alt={item.name} 
                     className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
                   />
@@ -369,21 +420,22 @@ const App = () => {
                 
                 <div className="mt-auto pt-3 border-t border-tea-50 flex items-center justify-between text-xs text-tea-400">
                   <span>{item.origin || '未知产地'}</span>
-                  <span>{new Date(item.createdAt).toLocaleDateString()}</span>
+                  <span>{new Date(item.created_at).toLocaleDateString()}</span>
                 </div>
               </div>
             </div>
           ))}
           
-          {filteredItems.length === 0 && (
+          {filteredItems.length === 0 && !isLoading && (
             <div className="col-span-full py-20 text-center text-tea-400">
               <div className="mx-auto w-16 h-16 bg-tea-100 rounded-full flex items-center justify-center mb-4">
-                <Search size={24} className="text-tea-400" />
+                <Database size={24} className="text-tea-400" />
               </div>
-              <p>没有找到相关藏品，去泡杯茶休息一下吧。</p>
+              <p>暂无数据。{supabase ? "快点击右上角添加第一款藏品吧。" : "请在设置中配置 Supabase 连接。"}</p>
             </div>
           )}
         </div>
+        )}
       </main>
 
       {/* Modals */}
@@ -394,7 +446,7 @@ const App = () => {
           item={editingItem}
           onSave={handleSave}
           onDelete={handleDelete}
-          imageConfig={imageConfig}
+          config={config}
         />
       )}
 
@@ -402,9 +454,8 @@ const App = () => {
         <SettingsModal 
           isOpen={isSettingsOpen} 
           onClose={() => setIsSettingsOpen(false)}
-          config={imageConfig}
-          onSave={setImageConfig}
-          onReset={handleResetConfig}
+          config={config}
+          onSave={setConfig}
         />
       )}
     </div>
@@ -413,7 +464,7 @@ const App = () => {
 
 // --- Sub Components ---
 
-const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, imageConfig }: any) => {
+const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, config }: any) => {
   const [formData, setFormData] = useState<Partial<TeaItem>>({
     type: 'TEA',
     name: '',
@@ -421,7 +472,7 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, imageConfig }: any
     year: '',
     origin: '',
     description: '',
-    imageUrl: ''
+    image_url: ''
   });
   
   const [isUploading, setIsUploading] = useState(false);
@@ -438,18 +489,14 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, imageConfig }: any
         year: '',
         origin: '',
         description: '',
-        imageUrl: ''
+        image_url: ''
       });
     }
   }, [item]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSave({
-      ...formData,
-      id: item?.id || Math.random().toString(36).substr(2, 9),
-      createdAt: item?.createdAt || Date.now()
-    });
+    onSave(formData);
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -458,7 +505,6 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, imageConfig }: any
 
     setIsUploading(true);
     
-    // Helper to read file as Base64 for local fallback
     const readFileAsBase64 = (f: File): Promise<string> => {
       return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -469,48 +515,43 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, imageConfig }: any
     };
 
     try {
-      // 1. Attempt API Upload if URL is configured
       let uploadSuccess = false;
+      
+      // Attempt API Upload
+      if (config.imageApiUrl) {
+          try {
+              const data = new FormData();
+              data.append('file', file);
+              if (config.imageApiToken) {
+                  data.append('token', config.imageApiToken);
+              }
 
-      if (imageConfig.apiUrl) {
-        try {
-          const data = new FormData();
-          data.append('file', file);
-          if (imageConfig.apiToken) {
-              data.append('token', imageConfig.apiToken);
+              const response = await fetch(config.imageApiUrl, {
+                method: 'POST',
+                body: data,
+              });
+              
+              if (response.ok) {
+                const result = await response.json();
+                const uploadedUrl = result.url || result.data?.url || result.link; 
+                
+                if (uploadedUrl) {
+                  setFormData(prev => ({ ...prev, image_url: uploadedUrl }));
+                  uploadSuccess = true;
+                }
+              }
+          } catch (netError) {
+              console.warn('Network upload failed, falling back to base64');
           }
-
-          const response = await fetch(imageConfig.apiUrl, {
-            method: 'POST',
-            body: data,
-          });
-          
-          if (response.ok) {
-            const result = await response.json();
-            // Try to find the URL in common response formats
-            const uploadedUrl = result.url || result.data?.url || result.link; 
-            
-            if (uploadedUrl) {
-              setFormData(prev => ({ ...prev, imageUrl: uploadedUrl }));
-              uploadSuccess = true;
-            }
-          } else {
-            console.warn(`API upload failed with status: ${response.status}`);
-          }
-        } catch (netError) {
-          console.warn('Network error during upload (CORS or Offline), switching to local mode.', netError);
-        }
       }
 
-      // 2. Fallback: Use Local Base64 if API failed or wasn't configured
+      // Fallback
       if (!uploadSuccess) {
         const base64 = await readFileAsBase64(file);
-        setFormData(prev => ({ ...prev, imageUrl: base64 }));
-        // Optionally log or toast here: "Using local storage for image"
+        setFormData(prev => ({ ...prev, image_url: base64 }));
       }
     } catch (error) {
-      console.error('Image processing failed:', error);
-      alert('图片处理出错，请重试');
+      alert('图片处理出错');
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -526,8 +567,8 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, imageConfig }: any
         
         {/* Left: Image */}
         <div className="w-full md:w-5/12 bg-tea-100 relative min-h-[200px] md:min-h-full">
-          {formData.imageUrl ? (
-            <img src={formData.imageUrl} alt="Preview" className="w-full h-full object-cover" />
+          {formData.image_url ? (
+            <img src={formData.image_url} alt="Preview" className="w-full h-full object-cover" />
           ) : (
             <div className="w-full h-full flex flex-col items-center justify-center text-tea-400 p-6 text-center border-b md:border-b-0 md:border-r border-tea-200">
               <Camera size={48} strokeWidth={1} className="mb-2" />
@@ -550,7 +591,7 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, imageConfig }: any
               disabled={isUploading}
             >
               {isUploading ? <Loader2 className="animate-spin" size={14} /> : <Upload size={14} />}
-              {formData.imageUrl ? '更换图片' : '上传图片'}
+              {formData.image_url ? '更换图片' : '上传图片'}
             </Button>
           </div>
         </div>
@@ -566,7 +607,6 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, imageConfig }: any
             </button>
           </div>
 
-          {/* Type Selector */}
           <div className="flex bg-tea-50 p-1 rounded-lg">
             {(['TEA', 'TEAWARE'] as const).map(t => (
               <button
@@ -596,14 +636,12 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, imageConfig }: any
                 label="分类" 
                 value={formData.category} 
                 onChange={(e: any) => setFormData({...formData, category: e.target.value})} 
-                placeholder={formData.type === 'TEA' ? "例如：普洱生茶" : "例如：紫砂壶"}
                 required
               />
               <Input 
                 label="年份" 
                 value={formData.year} 
                 onChange={(e: any) => setFormData({...formData, year: e.target.value})} 
-                placeholder="例如：2015" 
               />
             </div>
 
@@ -611,14 +649,12 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, imageConfig }: any
               label="产地 / 来源" 
               value={formData.origin} 
               onChange={(e: any) => setFormData({...formData, origin: e.target.value})} 
-              placeholder="例如：云南西双版纳" 
             />
 
             <TextArea 
               label="描述 / 品鉴笔记" 
               value={formData.description} 
               onChange={(e: any) => setFormData({...formData, description: e.target.value})} 
-              placeholder="记录香气、口感、入手渠道或收藏心得..." 
             />
           </div>
 
@@ -637,56 +673,104 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, imageConfig }: any
   );
 };
 
-const SettingsModal = ({ isOpen, onClose, config, onSave, onReset }: any) => {
-  const [localConfig, setLocalConfig] = useState(config);
+// --- Settings Modal ---
+
+const SettingsModal = ({ isOpen, onClose, config, onSave }: any) => {
+  const [localConfig, setLocalConfig] = useState<AppConfig>(config);
+  
+  // Update local state if prop changes
+  useEffect(() => {
+    setLocalConfig(config);
+  }, [config]);
+
+  const handleResetToEnv = () => {
+    if (confirm('确定要重置为系统环境变量吗？这将覆盖所有手动输入。')) {
+      const envConfig = {
+        supabaseUrl: getEnv('NEXT_PUBLIC_SUPABASE_URL') || '',
+        supabaseKey: getEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY') || '',
+        imageApiUrl: getEnv('NEXT_PUBLIC_IMAGE_API_URL') || 'https://cfbed.sanyue.de/api/upload',
+        imageApiToken: getEnv('NEXT_PUBLIC_IMAGE_API_TOKEN') || ''
+      };
+      setLocalConfig(envConfig);
+    }
+  };
 
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-stone-900/20 backdrop-blur-sm" onClick={onClose} />
-      <div className="bg-white rounded-xl w-full max-w-md p-6 relative shadow-xl animate-in fade-in scale-95 duration-200">
+      <div className="bg-white rounded-xl w-full max-w-lg p-6 relative shadow-xl animate-in fade-in scale-95 duration-200 max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center mb-6">
           <h3 className="font-serif text-xl font-bold text-tea-900 flex items-center gap-2">
-            <Settings size={20} /> 系统设置
+            <Settings size={20} /> 系统配置
           </h3>
           <button onClick={onClose}><X size={20} className="text-tea-400" /></button>
         </div>
 
-        <div className="space-y-4 mb-6">
-          <div className="p-3 bg-blue-50 text-blue-800 text-xs rounded-lg leading-relaxed">
-            <strong>图床说明：</strong> 项目默认支持对接类似 cfbed 的 API。
-            <br/>接口需支持 POST 请求，FormData 字段为 `file`，可选 `token`。
-            <br/>在 Vercel 部署时，建议将这些配置写入环境变量。
+        <div className="space-y-6 mb-6">
+          {/* Supabase Config */}
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 pb-2 border-b border-tea-100">
+               <Database size={16} className="text-accent"/>
+               <h4 className="font-bold text-tea-800 text-sm">Supabase 数据库</h4>
+            </div>
+            
+            <div className="bg-yellow-50 border border-yellow-100 p-3 rounded-lg text-xs text-yellow-800 flex gap-2 items-start">
+              <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+              <div>
+                <strong>重要提示：</strong> 请勿使用 `postgresql://` 格式的连接字符串，它包含主密码，极不安全且无法在浏览器使用。
+                <br/>请前往 <strong>Supabase Dashboard → Project Settings → API</strong> 获取以下信息：
+              </div>
+            </div>
+
+            <Input 
+              label="Project URL (API URL)" 
+              value={localConfig.supabaseUrl}
+              onChange={(e: any) => setLocalConfig({...localConfig, supabaseUrl: e.target.value})}
+              placeholder="https://your-project.supabase.co"
+            />
+            <Input 
+              label="API Key (anon / public)" 
+              type="password"
+              value={localConfig.supabaseKey}
+              onChange={(e: any) => setLocalConfig({...localConfig, supabaseKey: e.target.value})}
+              placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+            />
           </div>
-          
-          <Input 
-            label="图床 API 地址" 
-            value={localConfig.apiUrl}
-            onChange={(e: any) => setLocalConfig({...localConfig, apiUrl: e.target.value})}
-            placeholder="https://cfbed.sanyue.de/api/upload"
-          />
-          <Input 
-            label="API Token (可选)" 
-            type="password"
-            value={localConfig.apiToken}
-            onChange={(e: any) => setLocalConfig({...localConfig, apiToken: e.target.value})}
-            placeholder="输入你的 API Token"
-          />
+
+          {/* Image Config */}
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 pb-2 border-b border-tea-100">
+               <ImageIcon size={16} className="text-accent"/>
+               <h4 className="font-bold text-tea-800 text-sm">图床设置</h4>
+            </div>
+            
+            <Input 
+              label="图床 API 地址" 
+              value={localConfig.imageApiUrl}
+              onChange={(e: any) => setLocalConfig({...localConfig, imageApiUrl: e.target.value})}
+              placeholder="https://cfbed.sanyue.de/api/upload"
+            />
+            <Input 
+              label="API Token (可选)" 
+              type="password"
+              value={localConfig.imageApiToken}
+              onChange={(e: any) => setLocalConfig({...localConfig, imageApiToken: e.target.value})}
+              placeholder="输入你的 API Token"
+            />
+          </div>
         </div>
 
-        <div className="flex justify-between gap-3 pt-2 border-t border-tea-50">
-          <Button variant="ghost" onClick={() => {
-             if(confirm("确定要重置为系统默认配置（读取环境变量）吗？")) {
-               const defaults = onReset();
-               setLocalConfig(defaults);
-             }
-          }} className="text-red-400 hover:text-red-600 hover:bg-red-50 !px-2">
-            <RotateCcw size={16} className="mr-1"/> 重置默认
-          </Button>
-          <div className="flex gap-3">
-             <Button variant="secondary" onClick={onClose}>取消</Button>
-             <Button onClick={() => { onSave(localConfig); onClose(); }}>保存配置</Button>
+        <div className="flex justify-between items-center pt-4 border-t border-tea-50">
+           <Button variant="ghost" onClick={handleResetToEnv} className="!px-2 text-tea-400 hover:text-tea-600">
+              <RotateCcw size={14} className="mr-1"/> 重置为系统变量
+           </Button>
+           <div className="flex gap-3">
+            <Button variant="secondary" onClick={onClose}>取消</Button>
+            <Button onClick={() => { onSave(localConfig); onClose(); }}>
+                <Save size={16}/> 保存并连接
+            </Button>
           </div>
         </div>
       </div>
