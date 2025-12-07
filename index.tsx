@@ -19,18 +19,21 @@ import {
   AlertTriangle,
   Save,
   RotateCcw,
-  LogOut
+  LogOut,
+  Cpu
 } from 'lucide-react';
 
 // --- Helper for Safe Env Access ---
 const getEnv = (key: string): string | undefined => {
   try {
+    // Next.js / Create React App (Webpack)
     if (typeof process !== 'undefined' && process.env && process.env[key]) {
       return process.env[key];
     }
   } catch (e) {}
   
   try {
+    // Vite
     // @ts-ignore
     if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env[key]) {
       // @ts-ignore
@@ -125,15 +128,18 @@ const Badge = ({ children, color = 'tea' }: any) => {
 const App = () => {
   // Config State (Priority: LocalStorage > Env Vars)
   const [config, setConfig] = useState<AppConfig>(() => {
-    const saved = localStorage.getItem('tea_app_config');
+    // 1. Get System Env Vars
     const envSupabaseUrl = getEnv('NEXT_PUBLIC_SUPABASE_URL') || '';
     const envSupabaseKey = getEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY') || '';
     const envImageUrl = getEnv('NEXT_PUBLIC_IMAGE_API_URL') || 'https://cfbed.sanyue.de/api/upload';
     const envImageToken = getEnv('NEXT_PUBLIC_IMAGE_API_TOKEN') || '';
 
+    // 2. Get Saved Config
+    const saved = localStorage.getItem('tea_app_config');
+    
     if (saved) {
       const parsed = JSON.parse(saved);
-      // Merge saved config with env defaults if saved values are empty
+      // Smart Merge: If saved value is falsy (empty) but env has value, use Env
       return {
         supabaseUrl: parsed.supabaseUrl || envSupabaseUrl,
         supabaseKey: parsed.supabaseKey || envSupabaseKey,
@@ -142,6 +148,7 @@ const App = () => {
       };
     }
 
+    // 3. Default to Env
     return {
       supabaseUrl: envSupabaseUrl,
       supabaseKey: envSupabaseKey,
@@ -154,6 +161,8 @@ const App = () => {
   const supabase = useMemo(() => {
     if (config.supabaseUrl && config.supabaseKey) {
       try {
+        // Validate URL format simply to prevent crash
+        if (!config.supabaseUrl.startsWith('http')) return null;
         return createClient(config.supabaseUrl, config.supabaseKey);
       } catch (e) {
         console.error("Invalid Supabase Config", e);
@@ -678,21 +687,26 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, config }: any) => 
 const SettingsModal = ({ isOpen, onClose, config, onSave }: any) => {
   const [localConfig, setLocalConfig] = useState<AppConfig>(config);
   
-  // Update local state if prop changes
+  // Detect actual Env vars for debugging
+  const envStatus = {
+    supabaseUrl: getEnv('NEXT_PUBLIC_SUPABASE_URL'),
+    supabaseKey: getEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY'),
+    imageUrl: getEnv('NEXT_PUBLIC_IMAGE_API_URL'),
+  };
+
   useEffect(() => {
     setLocalConfig(config);
   }, [config]);
 
   const handleResetToEnv = () => {
-    if (confirm('确定要重置为系统环境变量吗？这将覆盖所有手动输入。')) {
-      const envConfig = {
-        supabaseUrl: getEnv('NEXT_PUBLIC_SUPABASE_URL') || '',
-        supabaseKey: getEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY') || '',
-        imageApiUrl: getEnv('NEXT_PUBLIC_IMAGE_API_URL') || 'https://cfbed.sanyue.de/api/upload',
-        imageApiToken: getEnv('NEXT_PUBLIC_IMAGE_API_TOKEN') || ''
-      };
-      setLocalConfig(envConfig);
-    }
+    const envConfig = {
+      supabaseUrl: getEnv('NEXT_PUBLIC_SUPABASE_URL') || '',
+      supabaseKey: getEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY') || '',
+      imageApiUrl: getEnv('NEXT_PUBLIC_IMAGE_API_URL') || 'https://cfbed.sanyue.de/api/upload',
+      imageApiToken: getEnv('NEXT_PUBLIC_IMAGE_API_TOKEN') || ''
+    };
+    setLocalConfig(envConfig);
+    alert('已加载系统环境变量，请点击“保存”以应用。');
   };
 
   if (!isOpen) return null;
@@ -709,6 +723,26 @@ const SettingsModal = ({ isOpen, onClose, config, onSave }: any) => {
         </div>
 
         <div className="space-y-6 mb-6">
+          {/* Environment Diagnosis */}
+          <div className="bg-stone-50 p-3 rounded-lg border border-stone-200">
+             <div className="flex items-center gap-2 mb-2 text-tea-800 text-sm font-bold">
+               <Cpu size={14}/> 环境变量诊断
+             </div>
+             <div className="space-y-1 text-xs text-tea-600">
+               <div className="flex justify-between">
+                 <span>Supabase URL:</span>
+                 {envStatus.supabaseUrl ? <span className="text-green-600 font-mono">✅ 已注入</span> : <span className="text-red-500 font-mono">❌ 未找到</span>}
+               </div>
+               <div className="flex justify-between">
+                 <span>Supabase Key:</span>
+                 {envStatus.supabaseKey ? <span className="text-green-600 font-mono">✅ 已注入</span> : <span className="text-red-500 font-mono">❌ 未找到</span>}
+               </div>
+               <div className="text-[10px] text-tea-400 mt-1 border-t border-stone-200 pt-1">
+                 如果此处显示❌，请在 Vercel 检查变量名并重新部署 (Redeploy)。
+               </div>
+             </div>
+          </div>
+
           {/* Supabase Config */}
           <div className="space-y-4">
             <div className="flex items-center gap-2 pb-2 border-b border-tea-100">
@@ -716,14 +750,6 @@ const SettingsModal = ({ isOpen, onClose, config, onSave }: any) => {
                <h4 className="font-bold text-tea-800 text-sm">Supabase 数据库</h4>
             </div>
             
-            <div className="bg-yellow-50 border border-yellow-100 p-3 rounded-lg text-xs text-yellow-800 flex gap-2 items-start">
-              <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-              <div>
-                <strong>重要提示：</strong> 请勿使用 `postgresql://` 格式的连接字符串，它包含主密码，极不安全且无法在浏览器使用。
-                <br/>请前往 <strong>Supabase Dashboard → Project Settings → API</strong> 获取以下信息：
-              </div>
-            </div>
-
             <Input 
               label="Project URL (API URL)" 
               value={localConfig.supabaseUrl}
