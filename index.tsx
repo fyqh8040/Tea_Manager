@@ -22,7 +22,8 @@ import {
   Cpu,
   Bug,
   Server,
-  Wifi
+  Wifi,
+  Key
 } from 'lucide-react';
 
 // --- Types ---
@@ -73,7 +74,10 @@ const Button = ({ children, onClick, variant = 'primary', className = '', disabl
 
 const Input = ({ label, ...props }: any) => (
   <div className="space-y-1.5">
-    <label className="text-xs font-semibold text-tea-500 uppercase tracking-wider">{label}</label>
+    <label className="text-xs font-semibold text-tea-500 uppercase tracking-wider flex justify-between">
+      {label}
+      {props.rightLabel}
+    </label>
     <input 
       className="w-full px-3 py-2 bg-white/50 border border-tea-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent transition-all text-tea-800 placeholder-tea-300 disabled:opacity-50 disabled:bg-tea-100/50"
       {...props}
@@ -134,7 +138,7 @@ const App = () => {
           const envData = await res.json();
           setServerConfig(envData);
           
-          // Auto-inject if local config is empty
+          // Auto-inject if local config is empty or matches defaults
           setConfig(prev => {
             const newConfig = { ...prev };
             let changed = false;
@@ -149,6 +153,11 @@ const App = () => {
             }
             if ((!newConfig.imageApiUrl || newConfig.imageApiUrl.includes('cfbed')) && envData.imageApiUrl) {
               newConfig.imageApiUrl = envData.imageApiUrl;
+              changed = true;
+            }
+            // Fix: Add Image Token Injection
+            if (!newConfig.imageApiToken && envData.imageApiToken) {
+              newConfig.imageApiToken = envData.imageApiToken;
               changed = true;
             }
 
@@ -713,7 +722,9 @@ const SettingsModal = ({ isOpen, onClose, config, onSave, serverConfig, isEnvLoa
   const envStatus = {
      connected: !!serverConfig,
      hasUrl: !!serverConfig?.supabaseUrl,
-     hasKey: !!serverConfig?.supabaseKey
+     hasKey: !!serverConfig?.supabaseKey,
+     hasImgUrl: !!serverConfig?.imageApiUrl,
+     hasImgToken: !!serverConfig?.imageApiToken
   };
 
   return (
@@ -747,12 +758,12 @@ const SettingsModal = ({ isOpen, onClose, config, onSave, serverConfig, isEnvLoa
              
              <div className="space-y-1 text-xs text-tea-600">
                <div className="flex justify-between">
-                 <span>Supabase URL:</span>
-                 {envStatus.hasUrl ? <span className="text-green-600 font-mono">✅ 已获取</span> : <span className="text-red-500 font-mono">❌ 未找到</span>}
+                 <span>Supabase Config:</span>
+                 {envStatus.hasUrl && envStatus.hasKey ? <span className="text-green-600 font-mono">✅ 已获取</span> : <span className="text-red-500 font-mono">⚠️ 部分缺失</span>}
                </div>
                <div className="flex justify-between">
-                 <span>Supabase Key:</span>
-                 {envStatus.hasKey ? <span className="text-green-600 font-mono">✅ 已获取</span> : <span className="text-red-500 font-mono">❌ 未找到</span>}
+                  <span>Image API Token:</span>
+                  {envStatus.hasImgToken ? <span className="text-green-600 font-mono">✅ 已获取</span> : <span className="text-stone-400 font-mono">◯ 未配置 (可选)</span>}
                </div>
                <div className="text-[10px] text-tea-400 mt-1 border-t border-stone-200 pt-1">
                  系统正在尝试从 /api/env 读取配置。如果失败，请检查是否已在 Vercel 重新部署。
@@ -769,12 +780,14 @@ const SettingsModal = ({ isOpen, onClose, config, onSave, serverConfig, isEnvLoa
             
             <Input 
               label="Project URL (API URL)" 
+              rightLabel={envStatus.hasUrl && <span className="text-green-600 text-[10px] flex items-center gap-0.5"><CheckCircle2 size={10}/> 自动获取</span>}
               value={localConfig.supabaseUrl}
               onChange={(e: any) => setLocalConfig({...localConfig, supabaseUrl: e.target.value})}
               placeholder="https://your-project.supabase.co"
             />
             <Input 
               label="API Key (anon / public)" 
+              rightLabel={envStatus.hasKey && <span className="text-green-600 text-[10px] flex items-center gap-0.5"><CheckCircle2 size={10}/> 自动获取</span>}
               type="password"
               value={localConfig.supabaseKey}
               onChange={(e: any) => setLocalConfig({...localConfig, supabaseKey: e.target.value})}
@@ -797,6 +810,7 @@ const SettingsModal = ({ isOpen, onClose, config, onSave, serverConfig, isEnvLoa
             />
             <Input 
               label="API Token (可选)" 
+              rightLabel={envStatus.hasImgToken && <span className="text-green-600 text-[10px] flex items-center gap-0.5"><CheckCircle2 size={10}/> 自动获取</span>}
               type="password"
               value={localConfig.imageApiToken}
               onChange={(e: any) => setLocalConfig({...localConfig, imageApiToken: e.target.value})}
