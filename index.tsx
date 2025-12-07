@@ -62,6 +62,16 @@ const INITIAL_DATA: TeaItem[] = [
   }
 ];
 
+// --- Helper for Safe Env Access ---
+const getEnv = (key: string, fallback: string = '') => {
+  try {
+    // @ts-ignore - process is defined during build time in Vercel/Next.js/Vite
+    return typeof process !== 'undefined' && process.env[key] ? process.env[key] : fallback;
+  } catch (e) {
+    return fallback;
+  }
+};
+
 // --- Components ---
 
 const Button = ({ children, onClick, variant = 'primary', className = '', disabled = false, type = 'button' }: any) => {
@@ -131,10 +141,22 @@ const App = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<TeaItem | null>(null);
   
-  // Image Config State (Simulating ENV vars)
-  const [imageConfig, setImageConfig] = useState<ImageConfig>({
-    apiUrl: 'https://cfbed.sanyue.de/api/upload', 
-    apiToken: '' 
+  // Image Config State (Prioritize LocalStorage -> Env Vars -> Default)
+  const [imageConfig, setImageConfig] = useState<ImageConfig>(() => {
+    // 1. Try LocalStorage
+    const savedConfig = localStorage.getItem('tea_image_config');
+    if (savedConfig) {
+      return JSON.parse(savedConfig);
+    }
+    // 2. Try Environment Variables (Vercel)
+    const envUrl = getEnv('NEXT_PUBLIC_IMAGE_API_URL');
+    const envToken = getEnv('NEXT_PUBLIC_IMAGE_API_TOKEN');
+    
+    // 3. Fallback
+    return {
+      apiUrl: envUrl || 'https://cfbed.sanyue.de/api/upload', 
+      apiToken: envToken || '' 
+    };
   });
 
   // Load Data
@@ -144,11 +166,6 @@ const App = () => {
       setItems(JSON.parse(saved));
     } else {
       setItems(INITIAL_DATA);
-    }
-
-    const savedConfig = localStorage.getItem('tea_image_config');
-    if (savedConfig) {
-      setImageConfig(JSON.parse(savedConfig));
     }
   }, []);
 
