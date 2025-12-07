@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
@@ -83,6 +82,18 @@ interface AppConfig {
 
 const TEA_UNITS = ['克 (g)', '千克 (kg)', '饼', '砖', '沱', '盒', '罐', '袋', '泡'];
 const TEAWARE_UNITS = ['件', '套', '个', '把', '只', '组'];
+
+const formatReason = (reason: string, changeAmount: number = 0) => {
+  switch (reason) {
+    case 'PURCHASE': return '新购入库';
+    case 'CONSUME': return '品饮/使用';
+    case 'GIFT': return changeAmount > 0 ? '获赠' : '赠友';
+    case 'DAMAGE': return '损耗/遗失';
+    case 'ADJUST': return changeAmount > 0 ? '盘盈调整' : '盘亏调整';
+    case 'INITIAL': return '初始入库';
+    default: return reason;
+  }
+};
 
 // --- Components ---
 
@@ -277,7 +288,7 @@ const App = () => {
     setDbError(null);
 
     try {
-      let data: TeaItem[] = [];
+      let data: any[] = [];
       let error: any = null;
 
       if (supabase) {
@@ -285,7 +296,7 @@ const App = () => {
           .from('tea_items')
           .select('*')
           .order('created_at', { ascending: false });
-        data = result.data as TeaItem[] || [];
+        data = result.data || [];
         error = result.error;
       } else if (config.hasServerDb) {
         const res = await fetch('/api/data');
@@ -302,7 +313,12 @@ const App = () => {
               throw error;
           }
       } else {
-          setItems(data);
+          // IMPORTANT: Parse numeric fields from DB (which might be returned as strings by postgres driver)
+          const parsedItems = data.map(item => ({
+            ...item,
+            quantity: Number(item.quantity) // Ensure quantity is a number
+          }));
+          setItems(parsedItems);
       }
     } catch (error: any) {
       console.error('Error fetching tea items:', error);
@@ -372,7 +388,7 @@ const App = () => {
       origin: item.origin,
       description: item.description,
       image_url: item.image_url,
-      quantity: item.quantity ?? 1, 
+      quantity: Number(item.quantity ?? 1), // Ensure number
       unit: item.unit || '件',
       ...(item.id ? {} : { created_at: Date.now() }) 
     };
@@ -430,12 +446,15 @@ const App = () => {
         }
 
         if (savedData) {
+            // Parse savedData numeric fields
+            const parsedSavedData = { ...savedData, quantity: Number(savedData.quantity) };
+            
             setItems(prev => {
-                const exists = prev.find(i => i.id === savedData!.id);
+                const exists = prev.find(i => i.id === parsedSavedData!.id);
                 if (exists) {
-                    return prev.map(i => i.id === savedData!.id ? savedData! : i);
+                    return prev.map(i => i.id === parsedSavedData!.id ? parsedSavedData! : i);
                 }
-                return [savedData!, ...prev];
+                return [parsedSavedData!, ...prev];
             });
             setIsModalOpen(false);
             setEditingItem(null);
@@ -498,8 +517,10 @@ const App = () => {
       }
 
       if (updatedItem) {
-        setItems(prev => prev.map(i => i.id === id ? updatedItem! : i));
-        setEditingItem(updatedItem);
+        // IMPORTANT: Parse updatedItem numeric fields
+        const parsedUpdatedItem = { ...updatedItem, quantity: Number(updatedItem.quantity) };
+        setItems(prev => prev.map(i => i.id === id ? parsedUpdatedItem! : i));
+        setEditingItem(parsedUpdatedItem);
         return true;
       }
     } catch (e) {
@@ -915,7 +936,15 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, onStockUpdate, con
         } else if (config.hasServerDb) {
             const res = await fetch(`/api/data?action=get_logs&id=${itemId}`);
             const json = await res.json();
-            if (json.data) setLogs(json.data);
+            if (json.data) {
+                // Parse logs numeric fields
+                const parsedLogs = json.data.map((log: any) => ({
+                    ...log,
+                    change_amount: Number(log.change_amount),
+                    current_balance: Number(log.current_balance)
+                }));
+                setLogs(parsedLogs);
+            }
         }
     } catch (e) {
         console.error("Fetch logs error", e);
@@ -1144,14 +1173,20 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, onStockUpdate, con
                             logs={logs} 
                             isLoading={isLoadingLogs}
                             onUpdate={async (amt: number, reason: string, note: string) => {
+                                // Explicitly cast item.quantity to number before adding
+                                // This prevents string concatenation (e.g. "251" + -10 = "251-10") when pg returns numerics as strings
+                                const currentQty = Number(item.quantity || 0);
+                                const newQty = currentQty + amt;
+
                                 // Add check for consumption
-                                if (amt < 0 && (item.quantity + amt) < 0) {
+                                if (amt < 0 && newQty < 0) {
                                     alert("库存不足，无法出库");
                                     return false;
                                 }
-                                const success = await onStockUpdate(item.id, (item.quantity || 0) + amt, amt, reason, note);
+                                
+                                const success = await onStockUpdate(item.id, newQty, amt, reason, note);
                                 if (success) {
-                                    setFormData(prev => ({...prev, quantity: (prev.quantity || 0) + amt})); // Update local form too
+                                    setFormData(prev => ({...prev, quantity: newQty})); // Update local form too
                                     fetchLogs(item.id); // Refresh logs
                                 }
                                 return success;
@@ -1324,7 +1359,7 @@ const InventoryManager = ({ item, logs, isLoading, onUpdate }: any) => {
                    <div className="flex-1 min-w-0">
                       <div className="flex justify-between items-start">
                          <span className="font-medium text-tea-900 text-sm">
-                           {formatReason(log.reason)}
+                           {formatReason(log.reason, log.change_amount)}
                          </span>
                          <span className={`font-mono font-bold text-sm ${log.change_amount > 0 ? 'text-green-600' : 'text-orange-600'}`}>
                            {log.change_amount > 0 ? '+' : ''}{Number(log.change_amount)} <span className="text-[10px] text-tea-400 font-normal">{item.unit}</span>
@@ -1343,18 +1378,6 @@ const InventoryManager = ({ item, logs, isLoading, onUpdate }: any) => {
        </div>
     </div>
   );
-};
-
-const formatReason = (r: string) => {
-  const map: Record<string, string> = {
-    'PURCHASE': '采购入库',
-    'CONSUME': '品饮/使用',
-    'GIFT': '赠送亲友',
-    'DAMAGE': '损耗/遗失',
-    'ADJUST': '库存盘点',
-    'INITIAL': '初始录入'
-  };
-  return map[r] || r;
 };
 
 const SettingsModal = ({ isOpen, onClose, config, serverConfig, isEnvLoading, onSave }: any) => {
