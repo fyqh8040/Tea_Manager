@@ -1,7 +1,7 @@
 
 export const SCHEMA_SQL = `
 -- 茶韵典藏 数据库初始化脚本
--- 请复制以下所有内容到 Supabase -> SQL Editor -> New Query 中运行
+-- 增加 DROP POLICY 确保脚本可重复执行 (Idempotent)
 
 -- 1. 创建核心藏品表
 create table if not exists tea_items (
@@ -17,8 +17,9 @@ create table if not exists tea_items (
   created_at bigint default (extract(epoch from now()) * 1000)::bigint
 );
 
--- 2. 开启行级安全策略 (允许公开读写，生产环境请按需收紧)
+-- 2. 设置 tea_items 权限 (先删除旧策略以防冲突)
 alter table tea_items enable row level security;
+drop policy if exists "Public Access Tea Items" on tea_items;
 create policy "Public Access Tea Items" on tea_items for all using (true);
 
 -- 3. 创建库存流水表
@@ -32,7 +33,8 @@ create table if not exists inventory_logs (
   created_at bigint default (extract(epoch from now()) * 1000)::bigint
 );
 
--- 4. 开启流水表权限
+-- 4. 设置 inventory_logs 权限
 alter table inventory_logs enable row level security;
+drop policy if exists "Public Access Inventory Logs" on inventory_logs;
 create policy "Public Access Inventory Logs" on inventory_logs for all using (true);
 `;

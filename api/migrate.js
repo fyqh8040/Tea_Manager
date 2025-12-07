@@ -1,3 +1,4 @@
+
 import { Pool } from 'pg';
 import { SCHEMA_SQL } from '../db/schema_definition.js';
 
@@ -20,15 +21,27 @@ export default async function handler(req, res) {
     // 2. 连接数据库
     const pool = new Pool({
       connectionString,
-      ssl: { rejectUnauthorized: false } // Supabase/Cloud DBs usually require SSL
+      ssl: { rejectUnauthorized: false } 
     });
     
     client = await pool.connect();
 
-    // 3. 执行 SQL (直接从模块导入，无需文件读取)
-    console.log('Executing migration SQL...');
-    await client.query(SCHEMA_SQL);
+    // 3. 执行 SQL (拆分语句逐条执行，提高稳定性)
+    console.log('Starting migration...');
+    
+    // 移除注释并按分号拆分
+    const statements = SCHEMA_SQL
+      .replace(/--.*$/gm, '') // 移除单行注释
+      .split(';')
+      .map(s => s.trim())
+      .filter(s => s.length > 0); // 过滤空语句
 
+    for (const statement of statements) {
+      // console.log('Executing:', statement); // Debug usage
+      await client.query(statement);
+    }
+
+    console.log('Migration completed successfully.');
     return res.status(200).json({ success: true, message: 'Database schema initialized successfully' });
 
   } catch (error) {
