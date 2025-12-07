@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { SCHEMA_SQL as INIT_SQL } from './db/schema_definition.js';
 import { 
   Plus, 
   Search, 
@@ -23,7 +24,20 @@ import {
   Bug,
   Server,
   Wifi,
-  Key
+  Key,
+  History,
+  Package,
+  ArrowUpCircle,
+  ArrowDownCircle,
+  Gift,
+  AlertOctagon,
+  ClipboardList,
+  Copy,
+  Terminal,
+  Play,
+  Zap,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 
 // --- Types ---
@@ -39,6 +53,17 @@ interface TeaItem {
   origin?: string;
   description?: string;
   image_url?: string;
+  quantity: number; // Added quantity
+  created_at: number;
+}
+
+interface InventoryLog {
+  id: string;
+  item_id: string;
+  change_amount: number;
+  current_balance: number;
+  reason: 'PURCHASE' | 'CONSUME' | 'GIFT' | 'DAMAGE' | 'ADJUST' | 'INITIAL';
+  note?: string;
   created_at: number;
 }
 
@@ -51,13 +76,21 @@ interface AppConfig {
 
 // --- Components ---
 
-const Button = ({ children, onClick, variant = 'primary', className = '', disabled = false, type = 'button' }: any) => {
-  const baseStyle = "px-4 py-2 rounded-lg font-medium transition-all duration-200 flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed";
+const Button = ({ children, onClick, variant = 'primary', className = '', disabled = false, type = 'button', size = 'md' }: any) => {
+  const baseStyle = "rounded-lg font-medium transition-all duration-200 flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed";
+  
+  const sizes = {
+    sm: "px-3 py-1.5 text-xs",
+    md: "px-4 py-2 text-sm",
+    lg: "px-6 py-3 text-base"
+  };
+
   const variants = {
     primary: "bg-accent text-white hover:bg-accent-dark shadow-md shadow-accent/20",
     secondary: "bg-white text-tea-700 border border-tea-200 hover:bg-tea-50 hover:border-tea-300",
     danger: "bg-red-50 text-red-600 border border-red-100 hover:bg-red-100",
-    ghost: "text-tea-600 hover:bg-tea-100"
+    ghost: "text-tea-600 hover:bg-tea-100",
+    outline: "border-2 border-tea-200 text-tea-600 hover:border-accent hover:text-accent"
   };
   
   return (
@@ -65,7 +98,7 @@ const Button = ({ children, onClick, variant = 'primary', className = '', disabl
       type={type}
       onClick={onClick} 
       disabled={disabled}
-      className={`${baseStyle} ${variants[variant as keyof typeof variants]} ${className}`}
+      className={`${baseStyle} ${sizes[size as keyof typeof sizes]} ${variants[variant as keyof typeof variants]} ${className}`}
     >
       {children}
     </button>
@@ -99,7 +132,9 @@ const Badge = ({ children, color = 'tea' }: any) => {
   const colors = {
     tea: "bg-tea-100 text-tea-700",
     accent: "bg-accent-light/30 text-accent-dark",
-    clay: "bg-orange-100 text-orange-800"
+    clay: "bg-orange-100 text-orange-800",
+    red: "bg-red-100 text-red-700",
+    green: "bg-green-100 text-green-700"
   };
   return (
     <span className={`px-2 py-0.5 rounded text-xs font-medium ${colors[color as keyof typeof colors]}`}>
@@ -155,7 +190,6 @@ const App = () => {
               newConfig.imageApiUrl = envData.imageApiUrl;
               changed = true;
             }
-            // Fix: Add Image Token Injection
             if (!newConfig.imageApiToken && envData.imageApiToken) {
               newConfig.imageApiToken = envData.imageApiToken;
               changed = true;
@@ -194,10 +228,12 @@ const App = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'ALL' | 'TEA' | 'TEAWARE'>('ALL');
   const [isLoading, setIsLoading] = useState(true);
+  const [dbError, setDbError] = useState<string | null>(null); // New state for DB errors
   
   // Modal States
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isDbInitOpen, setIsDbInitOpen] = useState(false); // New Modal state
   const [editingItem, setEditingItem] = useState<TeaItem | null>(null);
 
   // Persist config changes
@@ -213,16 +249,32 @@ const App = () => {
     }
     
     setIsLoading(true);
+    setDbError(null);
+
     try {
       const { data, error } = await supabase
         .from('tea_items')
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
-      if (data) setItems(data as TeaItem[]);
-    } catch (error) {
+      if (error) {
+          // Detect missing table error
+          // Supabase/Postgres Error 42P01: undefined_table
+          if (error.code === '42P01' || error.message.includes('relation "tea_items" does not exist')) { 
+              setDbError('TABLE_MISSING');
+              setIsDbInitOpen(true);
+          } else {
+              throw error;
+          }
+      } else {
+          if (data) setItems(data as TeaItem[]);
+      }
+    } catch (error: any) {
       console.error('Error fetching tea items:', error);
+      if (error.message && error.message.includes('relation "tea_items" does not exist')) {
+           setDbError('TABLE_MISSING');
+           setIsDbInitOpen(true);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -250,7 +302,7 @@ const App = () => {
   }, [items, filterType, searchQuery]);
 
   const handleDelete = async (id: string) => {
-    if (!confirm('确认删除这件藏品吗？')) return;
+    if (!confirm('确认删除这件藏品吗？\n删除后相关的库存历史也将一并删除。')) return;
     
     const previousItems = [...items];
     setItems(prev => prev.filter(i => i.id !== id));
@@ -275,6 +327,7 @@ const App = () => {
       origin: item.origin,
       description: item.description,
       image_url: item.image_url,
+      quantity: item.quantity ?? 1, // Default quantity
       ...(item.id ? {} : { created_at: Date.now() }) 
     };
 
@@ -293,6 +346,7 @@ const App = () => {
             if (error) throw error;
             savedData = data;
         } else {
+            // Insert new
             const { data, error } = await supabase
                 .from('tea_items')
                 .insert([itemData])
@@ -300,6 +354,18 @@ const App = () => {
                 .single();
             if (error) throw error;
             savedData = data;
+            
+            // Log initial inventory for new items
+            if (savedData && savedData.quantity > 0) {
+               await supabase.from('inventory_logs').insert([{
+                 item_id: savedData.id,
+                 change_amount: savedData.quantity,
+                 current_balance: savedData.quantity,
+                 reason: 'INITIAL',
+                 note: '初始入库',
+                 created_at: Date.now()
+               }]);
+            }
         }
 
         if (savedData) {
@@ -316,7 +382,49 @@ const App = () => {
 
     } catch (e: any) {
         console.error("Save error:", e);
-        alert(`保存失败: ${e.message}`);
+        if (e.code === '42P01') {
+             setDbError('TABLE_MISSING');
+             setIsDbInitOpen(true);
+        } else {
+            alert(`保存失败: ${e.message}`);
+        }
+    }
+  };
+
+  // Dedicated Stock Update Handler
+  const handleStockUpdate = async (id: string, newQuantity: number, changeAmount: number, reason: string, note: string) => {
+    if (!supabase) return;
+    try {
+      // 1. Update Log
+      const { error: logError } = await supabase.from('inventory_logs').insert([{
+        item_id: id,
+        change_amount: changeAmount,
+        current_balance: newQuantity,
+        reason: reason,
+        note: note,
+        created_at: Date.now()
+      }]);
+      if (logError) throw logError;
+
+      // 2. Update Item
+      const { data, error: itemError } = await supabase.from('tea_items')
+        .update({ quantity: newQuantity })
+        .eq('id', id)
+        .select()
+        .single();
+      if (itemError) throw itemError;
+
+      // 3. Update Local State
+      if (data) {
+        setItems(prev => prev.map(i => i.id === id ? data as TeaItem : i));
+        // Also update editing item to reflect changes immediately in modal
+        setEditingItem(data as TeaItem);
+      }
+      return true;
+    } catch (e) {
+      console.error("Stock update failed", e);
+      alert("库存更新失败，请重试");
+      return false;
     }
   };
 
@@ -337,7 +445,7 @@ const App = () => {
               {supabase ? <div className="w-2 h-2 rounded-full bg-green-500 mr-2 shadow-[0_0_8px_rgba(34,197,94,0.5)]"></div> : <div className="w-2 h-2 rounded-full bg-red-400 mr-2 animate-pulse"></div>}
               <Settings size={20} />
             </Button>
-            <Button onClick={() => { setEditingItem(null); setIsModalOpen(true); }} disabled={!supabase}>
+            <Button onClick={() => { setEditingItem(null); setIsModalOpen(true); }} disabled={!supabase || !!dbError}>
               <Plus size={18} />
               <span className="hidden sm:inline">记一笔</span>
             </Button>
@@ -356,7 +464,9 @@ const App = () => {
           <p className="text-tea-500 max-w-xl leading-relaxed">
             {!supabase 
               ? "系统未连接到云端。请点击右上角设置图标，配置 Supabase 连接信息。" 
-              : `目前云端共收录 ${items.length} 件藏品。每一片叶子都有它的故事。`
+              : dbError === 'TABLE_MISSING' 
+                ? <span className="text-red-500 flex items-center gap-2 font-medium bg-red-50 px-2 py-0.5 rounded-md inline-block mt-1"><AlertTriangle size={16}/> 数据库尚未初始化</span>
+                : `目前云端共收录 ${items.length} 件藏品。每一片叶子都有它的故事。`
             }
           </p>
         </header>
@@ -401,8 +511,25 @@ const App = () => {
             </div>
         )}
 
+        {/* Error State for Missing DB */}
+        {dbError === 'TABLE_MISSING' && !isLoading && (
+             <div className="col-span-full py-12 text-center bg-white rounded-xl border border-red-100 p-8 shadow-sm">
+              <div className="mx-auto w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mb-4 text-red-500">
+                <Database size={24} />
+              </div>
+              <h3 className="text-xl font-bold text-red-700 mb-2 font-serif">数据库未初始化</h3>
+              <p className="text-tea-600 mb-6 max-w-lg mx-auto leading-relaxed">
+                您的 Vercel 部署已成功，但 Supabase 数据库中还缺少必要的表结构。
+                <br/>您可以选择使用连接字符串一键修复，或手动复制 SQL 执行。
+              </p>
+              <Button onClick={() => setIsDbInitOpen(true)} className="mx-auto" variant="danger">
+                 <Terminal size={18}/> 打开初始化向导
+              </Button>
+            </div>
+        )}
+
         {/* Grid */}
-        {!isLoading && (
+        {!isLoading && !dbError && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {filteredItems.map(item => (
             <div 
@@ -425,7 +552,11 @@ const App = () => {
                 <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-4">
                   <p className="text-white text-sm font-medium">点击查看详情</p>
                 </div>
-                <div className="absolute top-3 right-3">
+                <div className="absolute top-3 right-3 flex gap-2">
+                   {/* Quantity Badge */}
+                   <Badge color="tea">
+                      x{item.quantity ?? 0}
+                   </Badge>
                   <Badge color={item.type === 'TEA' ? 'accent' : 'clay'}>
                     {item.type === 'TEA' ? '茶' : '器'}
                   </Badge>
@@ -470,7 +601,9 @@ const App = () => {
           item={editingItem}
           onSave={handleSave}
           onDelete={handleDelete}
+          onStockUpdate={handleStockUpdate}
           config={config}
+          supabase={supabase}
         />
       )}
 
@@ -484,13 +617,155 @@ const App = () => {
           onSave={setConfig}
         />
       )}
+
+      {/* DB Init Modal */}
+      {isDbInitOpen && (
+        <DbInitModal 
+          isOpen={isDbInitOpen} 
+          onClose={() => setIsDbInitOpen(false)} 
+        />
+      )}
     </div>
   );
 };
 
 // --- Sub Components ---
 
-const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, config }: any) => {
+const DbInitModal = ({ isOpen, onClose }: any) => {
+    const [copied, setCopied] = useState(false);
+    const [showManual, setShowManual] = useState(false);
+    const [isMigrating, setIsMigrating] = useState(false);
+    const [migrateStatus, setMigrateStatus] = useState<'IDLE' | 'SUCCESS' | 'ERROR'>('IDLE');
+    const [errorMessage, setErrorMessage] = useState('');
+
+    const handleCopy = () => {
+        navigator.clipboard.writeText(INIT_SQL);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+    };
+
+    const handleAutoMigrate = async () => {
+        setIsMigrating(true);
+        setErrorMessage('');
+        try {
+            const res = await fetch('/api/migrate', { method: 'POST' });
+            const data = await res.json();
+            if (res.ok) {
+                setMigrateStatus('SUCCESS');
+                // Reload after a short delay
+                setTimeout(() => window.location.reload(), 2000);
+            } else {
+                setMigrateStatus('ERROR');
+                setErrorMessage(data.details || data.error || '未知错误');
+            }
+        } catch (e: any) {
+             setMigrateStatus('ERROR');
+             setErrorMessage(e.message);
+        } finally {
+            setIsMigrating(false);
+        }
+    };
+
+    if (!isOpen) return null;
+
+    return (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-stone-900/60 backdrop-blur-sm" onClick={onClose} />
+            <div className="bg-white rounded-xl w-full max-w-2xl p-6 relative shadow-2xl animate-in fade-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
+                <div className="flex justify-between items-start mb-4">
+                     <div>
+                        <h3 className="font-serif text-xl font-bold text-tea-900 flex items-center gap-2">
+                             <Terminal className="text-accent" /> 数据库初始化向导
+                        </h3>
+                        <p className="text-sm text-tea-500 mt-1">检测到 Supabase 缺失表结构，请选择初始化方式。</p>
+                     </div>
+                     <button onClick={onClose}><X size={20} className="text-tea-400" /></button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto pr-2 space-y-6">
+                    
+                    {/* Method 1: Auto Fix */}
+                    <div className={`p-5 rounded-xl border-2 transition-all ${migrateStatus === 'ERROR' ? 'border-red-100 bg-red-50' : 'border-accent/20 bg-accent/5'}`}>
+                        <div className="flex items-center gap-3 mb-3">
+                             <div className={`w-8 h-8 rounded-full flex items-center justify-center ${migrateStatus === 'ERROR' ? 'bg-red-200 text-red-700' : 'bg-accent text-white'}`}>
+                                 {isMigrating ? <Loader2 size={16} className="animate-spin"/> : <Zap size={16}/>}
+                             </div>
+                             <div>
+                                 <h4 className="font-bold text-tea-900">方式一：一键自动初始化 (推荐)</h4>
+                                 <p className="text-xs text-tea-500">需要预先在 Vercel 环境变量中配置 <code className="bg-black/5 px-1 rounded">DATABASE_URL</code></p>
+                             </div>
+                        </div>
+
+                        {migrateStatus === 'SUCCESS' ? (
+                            <div className="text-green-600 font-bold flex items-center gap-2 p-2 bg-green-100 rounded-lg justify-center">
+                                <CheckCircle2 size={18}/> 初始化成功！正在刷新页面...
+                            </div>
+                        ) : (
+                            <div className="pl-11">
+                                <Button onClick={handleAutoMigrate} disabled={isMigrating} className="w-full sm:w-auto">
+                                    {isMigrating ? '正在执行...' : '立即执行初始化'}
+                                </Button>
+                                {migrateStatus === 'ERROR' && (
+                                    <div className="mt-3 text-xs text-red-600 bg-white/50 p-2 rounded border border-red-200">
+                                        <strong>执行失败:</strong> {errorMessage}
+                                        <div className="mt-1 text-tea-500">
+                                            请检查 Vercel 环境变量 <code className="text-red-500">DATABASE_URL</code> 是否配置正确，且包含 pg 依赖。
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Method 2: Manual */}
+                    <div className="border border-tea-200 rounded-xl overflow-hidden">
+                        <button onClick={() => setShowManual(!showManual)} className="w-full flex items-center justify-between p-4 bg-tea-50 hover:bg-tea-100 transition-colors">
+                            <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-full bg-tea-200 flex items-center justify-center text-tea-600">
+                                    <ClipboardList size={16}/>
+                                </div>
+                                <div className="text-left">
+                                     <h4 className="font-bold text-tea-800">方式二：手动 SQL 初始化</h4>
+                                     <p className="text-xs text-tea-500">如果不方便配置连接字符串，可手动复制 SQL 执行</p>
+                                </div>
+                            </div>
+                            {showManual ? <ChevronUp size={16} className="text-tea-400"/> : <ChevronDown size={16} className="text-tea-400"/>}
+                        </button>
+                        
+                        {showManual && (
+                            <div className="p-4 bg-white border-t border-tea-100 animate-in slide-in-from-top-2">
+                                <ol className="list-decimal list-inside space-y-2 text-sm text-tea-600 mb-4">
+                                    <li>前往 <a href="https://supabase.com/dashboard" target="_blank" className="text-accent underline">Supabase Dashboard</a> {"->"} SQL Editor {"->"} New Query</li>
+                                    <li>复制下方代码并粘贴执行</li>
+                                </ol>
+                                <div className="relative">
+                                    <div className="absolute top-2 right-2 z-10">
+                                        <Button size="sm" onClick={handleCopy} className={copied ? "!bg-green-600 !text-white" : ""}>
+                                            {copied ? <><CheckCircle2 size={14}/> 已复制</> : <><Copy size={14}/> 复制代码</>}
+                                        </Button>
+                                    </div>
+                                    <pre className="bg-[#1e1e1e] text-gray-300 p-4 rounded-lg text-xs font-mono overflow-x-auto border border-gray-700 leading-relaxed shadow-inner max-h-[200px]">
+                                        {INIT_SQL}
+                                    </pre>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                </div>
+                
+                <div className="mt-6 pt-4 border-t border-tea-50 flex justify-end">
+                    <Button onClick={() => window.location.reload()}>
+                        <RotateCcw size={16}/> 刷新页面检查状态
+                    </Button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, onStockUpdate, config, supabase }: any) => {
+  const [activeTab, setActiveTab] = useState<'DETAILS' | 'HISTORY'>('DETAILS');
   const [formData, setFormData] = useState<Partial<TeaItem>>({
     type: 'TEA',
     name: '',
@@ -498,15 +773,22 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, config }: any) => 
     year: '',
     origin: '',
     description: '',
-    image_url: ''
+    image_url: '',
+    quantity: 1
   });
   
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // History State
+  const [logs, setLogs] = useState<InventoryLog[]>([]);
+  const [isLoadingLogs, setIsLoadingLogs] = useState(false);
 
   useEffect(() => {
     if (item) {
       setFormData(item);
+      setActiveTab('DETAILS');
+      fetchLogs(item.id);
     } else {
       setFormData({
         type: 'TEA',
@@ -515,10 +797,24 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, config }: any) => 
         year: '',
         origin: '',
         description: '',
-        image_url: ''
+        image_url: '',
+        quantity: 1
       });
+      setActiveTab('DETAILS');
+      setLogs([]);
     }
   }, [item]);
+
+  const fetchLogs = async (itemId: string) => {
+    if (!supabase) return;
+    setIsLoadingLogs(true);
+    const { data } = await supabase.from('inventory_logs')
+      .select('*')
+      .eq('item_id', itemId)
+      .order('created_at', { ascending: false });
+    if (data) setLogs(data);
+    setIsLoadingLogs(false);
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -530,7 +826,6 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, config }: any) => 
     if (!file) return;
 
     setIsUploading(true);
-    
     const readFileAsBase64 = (f: File): Promise<string> => {
       return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -542,8 +837,6 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, config }: any) => 
 
     try {
       let uploadSuccess = false;
-      
-      // Attempt API Upload
       if (config.imageApiUrl) {
           try {
               const data = new FormData();
@@ -551,34 +844,22 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, config }: any) => 
               if (config.imageApiToken) {
                   data.append('token', config.imageApiToken);
               }
-
-              const response = await fetch(config.imageApiUrl, {
-                method: 'POST',
-                body: data,
-              });
-              
+              const response = await fetch(config.imageApiUrl, { method: 'POST', body: data });
               if (response.ok) {
                 const result = await response.json();
                 const uploadedUrl = result.url || result.data?.url || result.link; 
-                
                 if (uploadedUrl) {
                   setFormData(prev => ({ ...prev, image_url: uploadedUrl }));
                   uploadSuccess = true;
                 }
               }
-          } catch (netError) {
-              console.warn('Network upload failed, falling back to base64');
-          }
+          } catch (netError) { console.warn('Network upload failed, falling back to base64'); }
       }
-
-      // Fallback
       if (!uploadSuccess) {
         const base64 = await readFileAsBase64(file);
         setFormData(prev => ({ ...prev, image_url: base64 }));
       }
-    } catch (error) {
-      alert('图片处理出错');
-    } finally {
+    } catch (error) { alert('图片处理出错'); } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
@@ -589,246 +870,400 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, config }: any) => 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-stone-900/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="bg-[#fcfcfb] rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto relative shadow-2xl flex flex-col md:flex-row overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+      <div className="bg-[#fcfcfb] rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden relative shadow-2xl flex flex-col animate-in fade-in zoom-in-95 duration-200">
         
-        {/* Left: Image */}
-        <div className="w-full md:w-5/12 bg-tea-100 relative min-h-[200px] md:min-h-full">
-          {formData.image_url ? (
-            <img src={formData.image_url} alt="Preview" className="w-full h-full object-cover" />
-          ) : (
-            <div className="w-full h-full flex flex-col items-center justify-center text-tea-400 p-6 text-center border-b md:border-b-0 md:border-r border-tea-200">
-              <Camera size={48} strokeWidth={1} className="mb-2" />
-              <span className="text-sm">暂无图片</span>
-            </div>
-          )}
-          
-          <div className="absolute bottom-4 right-4 flex gap-2">
-            <input 
-              type="file" 
-              ref={fileInputRef} 
-              className="hidden" 
-              accept="image/*" 
-              onChange={handleImageUpload} 
-            />
-            <Button 
-              variant="secondary" 
-              className="!px-3 !py-1.5 text-xs shadow-lg bg-white/90 backdrop-blur"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isUploading}
-            >
-              {isUploading ? <Loader2 className="animate-spin" size={14} /> : <Upload size={14} />}
-              {formData.image_url ? '更换图片' : '上传图片'}
-            </Button>
-          </div>
+        {/* Modal Header */}
+        <div className="px-6 py-4 border-b border-tea-100 flex justify-between items-center bg-white">
+           <h2 className="font-serif text-xl font-bold text-tea-900">
+              {item ? (activeTab === 'DETAILS' ? '藏品详情' : '库存与历史') : '入库登记'}
+           </h2>
+           <button onClick={onClose} className="text-tea-400 hover:text-tea-600"><X size={24} /></button>
         </div>
 
-        {/* Right: Form */}
-        <form onSubmit={handleSubmit} className="flex-1 p-6 md:p-8 flex flex-col gap-5">
-          <div className="flex justify-between items-center">
-            <h2 className="font-serif text-2xl font-bold text-tea-900">
-              {item ? '编辑藏品' : '入库登记'}
-            </h2>
-            <button type="button" onClick={onClose} className="text-tea-400 hover:text-tea-600">
-              <X size={24} />
-            </button>
-          </div>
-
-          <div className="flex bg-tea-50 p-1 rounded-lg">
-            {(['TEA', 'TEAWARE'] as const).map(t => (
-              <button
-                key={t}
-                type="button"
-                className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-all ${
-                  formData.type === t ? 'bg-white text-tea-900 shadow-sm' : 'text-tea-500 hover:text-tea-700'
-                }`}
-                onClick={() => setFormData(prev => ({ ...prev, type: t }))}
-              >
-                {t === 'TEA' ? '茶品' : '茶器'}
-              </button>
-            ))}
-          </div>
-
-          <div className="space-y-4">
-            <Input 
-              label="名称" 
-              value={formData.name} 
-              onChange={(e: any) => setFormData({...formData, name: e.target.value})} 
-              placeholder={formData.type === 'TEA' ? "例如：2003年 易武正山" : "例如：顾景舟款 仿古壶"}
-              required 
-            />
-            
-            <div className="grid grid-cols-2 gap-4">
-              <Input 
-                label="分类" 
-                value={formData.category} 
-                onChange={(e: any) => setFormData({...formData, category: e.target.value})} 
-                required
-              />
-              <Input 
-                label="年份" 
-                value={formData.year} 
-                onChange={(e: any) => setFormData({...formData, year: e.target.value})} 
-              />
+        <div className="flex flex-1 overflow-hidden flex-col md:flex-row">
+            {/* Left: Image (Visible on Desktop) */}
+            <div className="hidden md:block w-5/12 bg-tea-100 relative">
+            {formData.image_url ? (
+                <img src={formData.image_url} alt="Preview" className="w-full h-full object-cover" />
+            ) : (
+                <div className="w-full h-full flex flex-col items-center justify-center text-tea-400 p-6 text-center">
+                <Camera size={48} strokeWidth={1} className="mb-2" />
+                <span className="text-sm">暂无图片</span>
+                </div>
+            )}
+            {activeTab === 'DETAILS' && (
+                <div className="absolute bottom-4 right-4 flex gap-2">
+                    <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
+                    <Button variant="secondary" size="sm" className="shadow-lg bg-white/90 backdrop-blur" onClick={() => fileInputRef.current?.click()} disabled={isUploading}>
+                        {isUploading ? <Loader2 className="animate-spin" size={14} /> : <Upload size={14} />}
+                        {formData.image_url ? '更换' : '上传'}
+                    </Button>
+                </div>
+            )}
             </div>
 
-            <Input 
-              label="产地 / 来源" 
-              value={formData.origin} 
-              onChange={(e: any) => setFormData({...formData, origin: e.target.value})} 
-            />
+            {/* Right: Content Area */}
+            <div className="flex-1 flex flex-col bg-[#fcfcfb] h-full overflow-hidden">
+                
+                {/* Tabs (Only if editing) */}
+                {item && (
+                    <div className="flex border-b border-tea-100">
+                        <button 
+                            onClick={() => setActiveTab('DETAILS')}
+                            className={`flex-1 py-3 text-sm font-medium flex items-center justify-center gap-2 ${activeTab === 'DETAILS' ? 'text-accent border-b-2 border-accent bg-tea-50/50' : 'text-tea-500 hover:bg-tea-50'}`}
+                        >
+                            <ClipboardList size={16}/> 基本信息
+                        </button>
+                        <button 
+                            onClick={() => setActiveTab('HISTORY')}
+                            className={`flex-1 py-3 text-sm font-medium flex items-center justify-center gap-2 ${activeTab === 'HISTORY' ? 'text-accent border-b-2 border-accent bg-tea-50/50' : 'text-tea-500 hover:bg-tea-50'}`}
+                        >
+                            <History size={16}/> 库存与历史
+                        </button>
+                    </div>
+                )}
 
-            <TextArea 
-              label="描述 / 品鉴笔记" 
-              value={formData.description} 
-              onChange={(e: any) => setFormData({...formData, description: e.target.value})} 
-            />
-          </div>
+                {/* Tab Content */}
+                <div className="flex-1 overflow-y-auto p-6">
+                    
+                    {/* --- TAB: DETAILS --- */}
+                    {(activeTab === 'DETAILS' || !item) && (
+                        <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+                            {/* Mobile Image Upload (Simplified) */}
+                            <div className="md:hidden flex items-center gap-4 mb-2">
+                                <div className="w-20 h-20 bg-tea-100 rounded-lg overflow-hidden flex-shrink-0">
+                                    {formData.image_url ? <img src={formData.image_url} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-tea-300"><ImageIcon size={20}/></div>}
+                                </div>
+                                <Button variant="secondary" size="sm" onClick={() => fileInputRef.current?.click()}>上传图片</Button>
+                                <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
+                            </div>
 
-          <div className="mt-auto pt-6 flex justify-end gap-3">
-            {item && (
-              <Button type="button" variant="danger" onClick={() => onDelete(item.id)} className="mr-auto">
-                <Trash2 size={18} />
-              </Button>
-            )}
-            <Button variant="secondary" onClick={onClose}>取消</Button>
-            <Button type="submit">保存藏品</Button>
-          </div>
-        </form>
+                            <div className="flex bg-tea-50 p-1 rounded-lg">
+                                {(['TEA', 'TEAWARE'] as const).map(t => (
+                                <button
+                                    key={t}
+                                    type="button"
+                                    className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-all ${
+                                    formData.type === t ? 'bg-white text-tea-900 shadow-sm' : 'text-tea-500 hover:text-tea-700'
+                                    }`}
+                                    onClick={() => setFormData(prev => ({ ...prev, type: t }))}
+                                >
+                                    {t === 'TEA' ? '茶品' : '茶器'}
+                                </button>
+                                ))}
+                            </div>
+
+                            <div className="space-y-4">
+                                <Input label="名称" value={formData.name} onChange={(e: any) => setFormData({...formData, name: e.target.value})} placeholder="藏品名称" required />
+                                <div className="grid grid-cols-2 gap-4">
+                                    <Input label="分类" value={formData.category} onChange={(e: any) => setFormData({...formData, category: e.target.value})} required />
+                                    <Input label="年份" value={formData.year} onChange={(e: any) => setFormData({...formData, year: e.target.value})} />
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                     <Input label="产地 / 来源" value={formData.origin} onChange={(e: any) => setFormData({...formData, origin: e.target.value})} />
+                                     {/* Only show initial quantity input if creating new */}
+                                     {!item && (
+                                         <Input label="初始数量" type="number" min="1" value={formData.quantity} onChange={(e: any) => setFormData({...formData, quantity: parseInt(e.target.value) || 0})} />
+                                     )}
+                                     {/* If editing, show read-only quantity here */}
+                                     {item && (
+                                         <div className="space-y-1.5 opacity-60">
+                                            <label className="text-xs font-semibold text-tea-500 uppercase tracking-wider">当前库存</label>
+                                            <div className="w-full px-3 py-2 bg-tea-50 border border-tea-200 rounded-lg text-tea-800 font-mono">
+                                                {formData.quantity}
+                                            </div>
+                                         </div>
+                                     )}
+                                </div>
+                                <TextArea label="描述 / 品鉴笔记" value={formData.description} onChange={(e: any) => setFormData({...formData, description: e.target.value})} />
+                            </div>
+
+                            <div className="mt-4 pt-4 border-t border-tea-50 flex justify-end gap-3">
+                                {item && <Button type="button" variant="danger" onClick={() => onDelete(item.id)} className="mr-auto"><Trash2 size={18} /></Button>}
+                                {!item && <Button variant="secondary" onClick={onClose}>取消</Button>}
+                                <Button type="submit">{item ? '更新信息' : '保存藏品'}</Button>
+                            </div>
+                        </form>
+                    )}
+
+                    {/* --- TAB: HISTORY & STOCK --- */}
+                    {activeTab === 'HISTORY' && item && (
+                        <InventoryManager 
+                            item={item} 
+                            logs={logs} 
+                            isLoading={isLoadingLogs}
+                            onUpdate={async (amt: number, reason: string, note: string) => {
+                                const success = await onStockUpdate(item.id, (item.quantity || 0) + amt, amt, reason, note);
+                                if (success) {
+                                    setFormData(prev => ({...prev, quantity: (prev.quantity || 0) + amt})); // Update local form too
+                                    fetchLogs(item.id); // Refresh logs
+                                }
+                                return success;
+                            }}
+                        />
+                    )}
+
+                </div>
+            </div>
+        </div>
       </div>
     </div>
   );
 };
 
-// --- Settings Modal ---
+const InventoryManager = ({ item, logs, isLoading, onUpdate }: any) => {
+  const [mode, setMode] = useState<'VIEW' | 'IN' | 'OUT'>('VIEW');
+  const [amount, setAmount] = useState<number>(1);
+  const [reason, setReason] = useState<string>('');
+  const [note, setNote] = useState<string>('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-const SettingsModal = ({ isOpen, onClose, config, onSave, serverConfig, isEnvLoading }: any) => {
-  const [localConfig, setLocalConfig] = useState<AppConfig>(config);
-  
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (amount <= 0) return;
+    
+    setIsSubmitting(true);
+    // If OUT, amount should be negative
+    const finalAmount = mode === 'OUT' ? -amount : amount;
+    const finalReason = reason || (mode === 'IN' ? 'PURCHASE' : 'CONSUME');
+    
+    const success = await onUpdate(finalAmount, finalReason, note);
+    if (success) {
+      setMode('VIEW');
+      setAmount(1);
+      setReason('');
+      setNote('');
+    }
+    setIsSubmitting(false);
+  };
+
+  const reasons = {
+    IN: [
+      { value: 'PURCHASE', label: '新购入库' },
+      { value: 'GIFT', label: '获赠' },
+      { value: 'ADJUST', label: '盘盈调整' },
+    ],
+    OUT: [
+      { value: 'CONSUME', label: '日常消耗' },
+      { value: 'GIFT', label: '赠友' },
+      { value: 'DAMAGE', label: '损耗/遗失' },
+      { value: 'ADJUST', label: '盘亏调整' },
+    ]
+  };
+
+  return (
+    <div className="flex flex-col h-full">
+       {/* Actions Header */}
+       <div className="flex gap-3 mb-6 p-1 bg-tea-50/50 rounded-lg">
+          <button 
+             type="button"
+             onClick={() => setMode('IN')}
+             className={`flex-1 py-2 rounded-md font-medium text-sm flex items-center justify-center gap-2 transition-all ${mode === 'IN' ? 'bg-green-100 text-green-700 shadow-sm ring-1 ring-green-200' : 'text-tea-600 hover:bg-white'}`}
+          >
+             <ArrowUpCircle size={16} /> 入库
+          </button>
+           <button 
+             type="button"
+             onClick={() => setMode('OUT')}
+             className={`flex-1 py-2 rounded-md font-medium text-sm flex items-center justify-center gap-2 transition-all ${mode === 'OUT' ? 'bg-orange-100 text-orange-700 shadow-sm ring-1 ring-orange-200' : 'text-tea-600 hover:bg-white'}`}
+          >
+             <ArrowDownCircle size={16} /> 出库
+          </button>
+           {mode !== 'VIEW' && (
+             <button type="button" onClick={() => setMode('VIEW')} className="px-3 text-tea-400 hover:text-tea-600">
+               取消
+             </button>
+           )}
+       </div>
+
+       {/* Form Area */}
+       {mode !== 'VIEW' && (
+         <form onSubmit={handleSubmit} className="bg-white border border-tea-100 rounded-xl p-5 mb-6 shadow-sm animate-in slide-in-from-top-2">
+            <h4 className="font-bold text-tea-900 mb-4 flex items-center gap-2">
+              {mode === 'IN' ? <span className="text-green-600">新增入库</span> : <span className="text-orange-600">库存消耗</span>}
+            </h4>
+            
+            <div className="space-y-4">
+               <div className="flex gap-4">
+                  <div className="w-1/3">
+                    <Input 
+                      label="数量" 
+                      type="number" 
+                      min="1" 
+                      value={amount} 
+                      onChange={(e: any) => setAmount(parseInt(e.target.value) || 0)} 
+                      required
+                    />
+                  </div>
+                  <div className="flex-1 space-y-1.5">
+                     <label className="text-xs font-semibold text-tea-500 uppercase tracking-wider">变动原因</label>
+                     <select 
+                       className="w-full px-3 py-2 bg-white border border-tea-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-accent/50 text-tea-800"
+                       value={reason}
+                       onChange={(e) => setReason(e.target.value)}
+                     >
+                       <option value="">-- 请选择 --</option>
+                       {reasons[mode].map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                     </select>
+                  </div>
+               </div>
+               <Input 
+                  label="备注说明 (可选)" 
+                  placeholder="例如：2024春茶采购..." 
+                  value={note}
+                  onChange={(e: any) => setNote(e.target.value)}
+               />
+               
+               <Button type="submit" disabled={isSubmitting} className="w-full" variant={mode === 'IN' ? 'primary' : 'danger'}>
+                 {isSubmitting ? <Loader2 className="animate-spin" size={18}/> : <CheckCircle2 size={18}/>}
+                 确认{mode === 'IN' ? '入库' : '出库'}
+               </Button>
+            </div>
+         </form>
+       )}
+
+       {/* Logs List */}
+       <div className="flex-1 overflow-y-auto min-h-[300px]">
+          <div className="font-bold text-xs text-tea-400 uppercase tracking-wider mb-3 sticky top-0 bg-[#fcfcfb] py-2 z-10 flex justify-between items-center">
+             <span>库存变动记录</span>
+             {isLoading && <Loader2 size={12} className="animate-spin"/>}
+          </div>
+          
+          {logs.length === 0 ? (
+            <div className="text-center py-10 text-tea-300 text-sm">暂无记录</div>
+          ) : (
+            <div className="space-y-3">
+              {logs.map((log: InventoryLog) => (
+                <div key={log.id} className="bg-white border border-tea-50 p-3 rounded-lg flex items-start gap-3 shadow-sm">
+                   <div className={`mt-1 w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
+                     log.change_amount > 0 ? 'bg-green-50 text-green-600' : 
+                     log.reason === 'INITIAL' ? 'bg-blue-50 text-blue-600' : 'bg-orange-50 text-orange-600'
+                   }`}>
+                     {log.reason === 'INITIAL' ? <Package size={14}/> : 
+                      log.change_amount > 0 ? <Plus size={14}/> : <ArrowDownCircle size={14}/>}
+                   </div>
+                   <div className="flex-1 min-w-0">
+                      <div className="flex justify-between items-start">
+                         <span className="font-medium text-tea-900 text-sm">
+                           {formatReason(log.reason)}
+                         </span>
+                         <span className={`font-mono font-bold text-sm ${log.change_amount > 0 ? 'text-green-600' : 'text-orange-600'}`}>
+                           {log.change_amount > 0 ? '+' : ''}{log.change_amount}
+                         </span>
+                      </div>
+                      {log.note && <p className="text-xs text-tea-500 mt-1">{log.note}</p>}
+                      <div className="flex justify-between mt-2 pt-2 border-t border-tea-50/50 text-[10px] text-tea-300">
+                         <span>结余: {log.current_balance}</span>
+                         <span>{new Date(log.created_at).toLocaleString()}</span>
+                      </div>
+                   </div>
+                </div>
+              ))}
+            </div>
+          )}
+       </div>
+    </div>
+  );
+};
+
+const formatReason = (r: string) => {
+  const map: Record<string, string> = {
+    'PURCHASE': '采购入库',
+    'CONSUME': '品饮消耗',
+    'GIFT': '赠送亲友',
+    'DAMAGE': '损耗/遗失',
+    'ADJUST': '库存盘点',
+    'INITIAL': '初始录入'
+  };
+  return map[r] || r;
+};
+
+const SettingsModal = ({ isOpen, onClose, config, serverConfig, isEnvLoading, onSave }: any) => {
+  const [localConfig, setLocalConfig] = useState(config);
+  const [showSecrets, setShowSecrets] = useState(false);
+
   useEffect(() => {
     setLocalConfig(config);
   }, [config]);
 
-  const handleResetToEnv = () => {
-    if (serverConfig) {
-      setLocalConfig(serverConfig);
-      alert('已加载系统环境变量，请点击“保存”以应用。');
-    } else {
-      alert('未能获取到系统变量，请检查 Vercel 部署。');
-    }
+  const handleSave = () => {
+    onSave(localConfig);
+    onClose();
   };
 
   if (!isOpen) return null;
 
-  const envStatus = {
-     connected: !!serverConfig,
-     hasUrl: !!serverConfig?.supabaseUrl,
-     hasKey: !!serverConfig?.supabaseKey,
-     hasImgUrl: !!serverConfig?.imageApiUrl,
-     hasImgToken: !!serverConfig?.imageApiToken
-  };
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-stone-900/20 backdrop-blur-sm" onClick={onClose} />
-      <div className="bg-white rounded-xl w-full max-w-lg p-6 relative shadow-xl animate-in fade-in scale-95 duration-200 max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-stone-900/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="bg-white rounded-xl w-full max-w-lg p-6 relative shadow-2xl animate-in fade-in zoom-in-95 duration-200">
         <div className="flex justify-between items-center mb-6">
           <h3 className="font-serif text-xl font-bold text-tea-900 flex items-center gap-2">
-            <Settings size={20} /> 系统配置
+            <Settings className="text-tea-500" /> 系统设置
           </h3>
           <button onClick={onClose}><X size={20} className="text-tea-400" /></button>
         </div>
 
-        <div className="space-y-6 mb-6">
-          {/* Environment Diagnosis */}
-          <div className="bg-stone-50 p-3 rounded-lg border border-stone-200">
-             <div className="flex items-center justify-between gap-2 mb-2 text-tea-800 text-sm font-bold">
-               <div className="flex items-center gap-2">
-                 <Server size={14}/> 环境变量服务状态
-               </div>
-               <div className="flex items-center gap-1 text-xs">
-                 {isEnvLoading ? (
-                   <span className="flex items-center gap-1 text-tea-400"><Loader2 size={10} className="animate-spin"/> 连接中...</span>
-                 ) : envStatus.connected ? (
-                   <span className="flex items-center gap-1 text-green-600"><Wifi size={10}/> 已连接到云端</span>
-                 ) : (
-                   <span className="flex items-center gap-1 text-red-500"><Wifi size={10}/> 无法连接云端</span>
-                 )}
-               </div>
-             </div>
-             
-             <div className="space-y-1 text-xs text-tea-600">
-               <div className="flex justify-between">
-                 <span>Supabase Config:</span>
-                 {envStatus.hasUrl && envStatus.hasKey ? <span className="text-green-600 font-mono">✅ 已获取</span> : <span className="text-red-500 font-mono">⚠️ 部分缺失</span>}
-               </div>
-               <div className="flex justify-between">
-                  <span>Image API Token:</span>
-                  {envStatus.hasImgToken ? <span className="text-green-600 font-mono">✅ 已获取</span> : <span className="text-stone-400 font-mono">◯ 未配置 (可选)</span>}
-               </div>
-               <div className="text-[10px] text-tea-400 mt-1 border-t border-stone-200 pt-1">
-                 系统正在尝试从 /api/env 读取配置。如果失败，请检查是否已在 Vercel 重新部署。
-               </div>
-             </div>
-          </div>
-
+        <div className="space-y-6">
           {/* Supabase Config */}
           <div className="space-y-4">
-            <div className="flex items-center gap-2 pb-2 border-b border-tea-100">
-               <Database size={16} className="text-accent"/>
-               <h4 className="font-bold text-tea-800 text-sm">Supabase 数据库</h4>
-            </div>
+            <h4 className="font-bold text-sm text-tea-800 uppercase tracking-wider border-b border-tea-100 pb-2">数据库连接 (Supabase)</h4>
             
             <Input 
-              label="Project URL (API URL)" 
-              rightLabel={envStatus.hasUrl && <span className="text-green-600 text-[10px] flex items-center gap-0.5"><CheckCircle2 size={10}/> 自动获取</span>}
-              value={localConfig.supabaseUrl}
+              label="Project URL" 
+              value={localConfig.supabaseUrl} 
               onChange={(e: any) => setLocalConfig({...localConfig, supabaseUrl: e.target.value})}
-              placeholder="https://your-project.supabase.co"
+              placeholder="https://xxx.supabase.co"
+              rightLabel={serverConfig?.supabaseUrl ? <Badge color="green">已检测到环境变量</Badge> : null}
             />
-            <Input 
-              label="API Key (anon / public)" 
-              rightLabel={envStatus.hasKey && <span className="text-green-600 text-[10px] flex items-center gap-0.5"><CheckCircle2 size={10}/> 自动获取</span>}
+            
+            <div className="relative">
+               <Input 
+                  label="Anon Key" 
+                  type={showSecrets ? "text" : "password"}
+                  value={localConfig.supabaseKey} 
+                  onChange={(e: any) => setLocalConfig({...localConfig, supabaseKey: e.target.value})}
+                  placeholder="eyJhbGciOiJIUzI1NiIsInR..."
+                  rightLabel={serverConfig?.supabaseKey ? <Badge color="green">已检测到环境变量</Badge> : null}
+               />
+               <button 
+                type="button"
+                onClick={() => setShowSecrets(!showSecrets)}
+                className="absolute right-3 top-[29px] text-tea-400 hover:text-tea-600"
+               >
+                 {showSecrets ? <AlertCircle size={16}/> : <Key size={16}/>}
+               </button>
+            </div>
+          </div>
+
+          {/* Image API Config */}
+          <div className="space-y-4">
+             <h4 className="font-bold text-sm text-tea-800 uppercase tracking-wider border-b border-tea-100 pb-2">图片上传服务 (可选)</h4>
+             <Input 
+              label="API URL" 
+              value={localConfig.imageApiUrl} 
+              onChange={(e: any) => setLocalConfig({...localConfig, imageApiUrl: e.target.value})}
+              placeholder="https://api.example.com/upload"
+            />
+             <Input 
+              label="Auth Token" 
               type="password"
-              value={localConfig.supabaseKey}
-              onChange={(e: any) => setLocalConfig({...localConfig, supabaseKey: e.target.value})}
-              placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+              value={localConfig.imageApiToken} 
+              onChange={(e: any) => setLocalConfig({...localConfig, imageApiToken: e.target.value})}
+              placeholder="Bearer ..."
             />
           </div>
 
-          {/* Image Config */}
-          <div className="space-y-4">
-            <div className="flex items-center gap-2 pb-2 border-b border-tea-100">
-               <ImageIcon size={16} className="text-accent"/>
-               <h4 className="font-bold text-tea-800 text-sm">图床设置</h4>
-            </div>
-            
-            <Input 
-              label="图床 API 地址" 
-              value={localConfig.imageApiUrl}
-              onChange={(e: any) => setLocalConfig({...localConfig, imageApiUrl: e.target.value})}
-              placeholder="https://cfbed.sanyue.de/api/upload"
-            />
-            <Input 
-              label="API Token (可选)" 
-              rightLabel={envStatus.hasImgToken && <span className="text-green-600 text-[10px] flex items-center gap-0.5"><CheckCircle2 size={10}/> 自动获取</span>}
-              type="password"
-              value={localConfig.imageApiToken}
-              onChange={(e: any) => setLocalConfig({...localConfig, imageApiToken: e.target.value})}
-              placeholder="输入你的 API Token"
-            />
+          <div className="bg-tea-50 p-3 rounded text-xs text-tea-500 leading-relaxed">
+            <p className="font-bold mb-1">提示：</p>
+            配置信息仅保存在当前浏览器的 LocalStorage 中，不会上传到任何服务器。
+            推荐在 Vercel 环境变量中配置 <code className="bg-black/5 px-1 rounded">NEXT_PUBLIC_SUPABASE_URL</code> 等变量以自动加载。
           </div>
         </div>
 
-        <div className="flex justify-between items-center pt-4 border-t border-tea-50">
-           <Button variant="ghost" onClick={handleResetToEnv} className="!px-2 text-tea-400 hover:text-tea-600" disabled={!serverConfig}>
-              <RotateCcw size={14} className="mr-1"/> 重置为系统变量
-           </Button>
-           <div className="flex gap-3">
-            <Button variant="secondary" onClick={onClose}>取消</Button>
-            <Button onClick={() => { onSave(localConfig); onClose(); }}>
-                <Save size={16}/> 保存并连接
-            </Button>
-          </div>
+        <div className="mt-8 pt-4 border-t border-tea-50 flex justify-end gap-3">
+           <Button variant="secondary" onClick={onClose}>取消</Button>
+           <Button onClick={handleSave}><Save size={16}/> 保存配置</Button>
         </div>
       </div>
     </div>
