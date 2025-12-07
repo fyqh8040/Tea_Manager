@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
@@ -23,25 +22,46 @@ import {
   Cpu
 } from 'lucide-react';
 
-// --- Helper for Safe Env Access ---
-const getEnv = (key: string): string | undefined => {
+// --- Helper for Safe Env Access (EXPLICIT ACCESS REQUIRED FOR BUNDLERS) ---
+// Bundlers like Webpack/Next.js replace 'process.env.VAR' statically at build time.
+// Dynamic access like process.env[key] DOES NOT WORK for build-time injection.
+const getSystemEnv = () => {
+  const envs = {
+    supabaseUrl: '',
+    supabaseKey: '',
+    imageApiUrl: '',
+    imageApiToken: ''
+  };
+
+  // 1. Try process.env (Next.js / CRA / Webpack)
   try {
-    // Next.js / Create React App (Webpack)
-    if (typeof process !== 'undefined' && process.env && process.env[key]) {
-      return process.env[key];
-    }
-  } catch (e) {}
-  
-  try {
-    // Vite
-    // @ts-ignore
-    if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env[key]) {
-      // @ts-ignore
-      return import.meta.env[key];
+    if (typeof process !== 'undefined' && process.env) {
+      envs.supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+      envs.supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+      envs.imageApiUrl = process.env.NEXT_PUBLIC_IMAGE_API_URL || '';
+      envs.imageApiToken = process.env.NEXT_PUBLIC_IMAGE_API_TOKEN || '';
     }
   } catch (e) {}
 
-  return undefined;
+  // 2. Try import.meta.env (Vite)
+  try {
+    // @ts-ignore
+    if (typeof import.meta !== 'undefined' && import.meta.env) {
+      // @ts-ignore
+      envs.supabaseUrl = envs.supabaseUrl || import.meta.env.NEXT_PUBLIC_SUPABASE_URL || '';
+      // @ts-ignore
+      envs.supabaseKey = envs.supabaseKey || import.meta.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+      // @ts-ignore
+      envs.imageApiUrl = envs.imageApiUrl || import.meta.env.NEXT_PUBLIC_IMAGE_API_URL || '';
+      // @ts-ignore
+      envs.imageApiToken = envs.imageApiToken || import.meta.env.NEXT_PUBLIC_IMAGE_API_TOKEN || '';
+    }
+  } catch (e) {}
+  
+  // Defaults
+  if (!envs.imageApiUrl) envs.imageApiUrl = 'https://cfbed.sanyue.de/api/upload';
+
+  return envs;
 };
 
 // --- Types ---
@@ -128,11 +148,8 @@ const Badge = ({ children, color = 'tea' }: any) => {
 const App = () => {
   // Config State (Priority: LocalStorage > Env Vars)
   const [config, setConfig] = useState<AppConfig>(() => {
-    // 1. Get System Env Vars
-    const envSupabaseUrl = getEnv('NEXT_PUBLIC_SUPABASE_URL') || '';
-    const envSupabaseKey = getEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY') || '';
-    const envImageUrl = getEnv('NEXT_PUBLIC_IMAGE_API_URL') || 'https://cfbed.sanyue.de/api/upload';
-    const envImageToken = getEnv('NEXT_PUBLIC_IMAGE_API_TOKEN') || '';
+    // 1. Get System Env Vars (Explicitly)
+    const envs = getSystemEnv();
 
     // 2. Get Saved Config
     const saved = localStorage.getItem('tea_app_config');
@@ -141,20 +158,15 @@ const App = () => {
       const parsed = JSON.parse(saved);
       // Smart Merge: If saved value is falsy (empty) but env has value, use Env
       return {
-        supabaseUrl: parsed.supabaseUrl || envSupabaseUrl,
-        supabaseKey: parsed.supabaseKey || envSupabaseKey,
-        imageApiUrl: parsed.imageApiUrl || envImageUrl,
-        imageApiToken: parsed.imageApiToken || envImageToken
+        supabaseUrl: parsed.supabaseUrl || envs.supabaseUrl,
+        supabaseKey: parsed.supabaseKey || envs.supabaseKey,
+        imageApiUrl: parsed.imageApiUrl || envs.imageApiUrl,
+        imageApiToken: parsed.imageApiToken || envs.imageApiToken
       };
     }
 
     // 3. Default to Env
-    return {
-      supabaseUrl: envSupabaseUrl,
-      supabaseKey: envSupabaseKey,
-      imageApiUrl: envImageUrl,
-      imageApiToken: envImageToken
-    };
+    return envs;
   });
 
   // Supabase Client Instance
@@ -687,24 +699,15 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, config }: any) => 
 const SettingsModal = ({ isOpen, onClose, config, onSave }: any) => {
   const [localConfig, setLocalConfig] = useState<AppConfig>(config);
   
-  // Detect actual Env vars for debugging
-  const envStatus = {
-    supabaseUrl: getEnv('NEXT_PUBLIC_SUPABASE_URL'),
-    supabaseKey: getEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY'),
-    imageUrl: getEnv('NEXT_PUBLIC_IMAGE_API_URL'),
-  };
+  // Detect actual Env vars for debugging (Using the explicit getter)
+  const envStatus = getSystemEnv();
 
   useEffect(() => {
     setLocalConfig(config);
   }, [config]);
 
   const handleResetToEnv = () => {
-    const envConfig = {
-      supabaseUrl: getEnv('NEXT_PUBLIC_SUPABASE_URL') || '',
-      supabaseKey: getEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY') || '',
-      imageApiUrl: getEnv('NEXT_PUBLIC_IMAGE_API_URL') || 'https://cfbed.sanyue.de/api/upload',
-      imageApiToken: getEnv('NEXT_PUBLIC_IMAGE_API_TOKEN') || ''
-    };
+    const envConfig = getSystemEnv();
     setLocalConfig(envConfig);
     alert('已加载系统环境变量，请点击“保存”以应用。');
   };
