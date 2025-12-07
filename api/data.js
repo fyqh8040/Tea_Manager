@@ -28,14 +28,14 @@ export default async function handler(req, res) {
     if (method === 'GET') {
       if (action === 'get_logs') {
         const result = await db.query(
-          'SELECT * FROM inventory_logs WHERE item_id = $1 ORDER BY created_at DESC',
+          'SELECT * FROM public.inventory_logs WHERE item_id = $1 ORDER BY created_at DESC',
           [id]
         );
         return res.status(200).json({ data: result.rows });
       } 
       else {
         const result = await db.query(
-          'SELECT * FROM tea_items ORDER BY created_at DESC'
+          'SELECT * FROM public.tea_items ORDER BY created_at DESC'
         );
         return res.status(200).json({ data: result.rows });
       }
@@ -48,29 +48,29 @@ export default async function handler(req, res) {
 
       // 1. Delete
       if (op === 'delete') {
-        await db.query('DELETE FROM tea_items WHERE id = $1', [body.id]);
+        await db.query('DELETE FROM public.tea_items WHERE id = $1', [body.id]);
         return res.status(200).json({ success: true });
       }
 
       // 2. Create / Update
       if (op === 'create' || op === 'update') {
         const itemData = body.data;
-        // 定义通用字段 (不含 created_at)
+        // 定义通用字段
         const commonFields = ['name', 'type', 'category', 'year', 'origin', 'description', 'image_url', 'quantity'];
         
         if (op === 'update') {
-          // Update: 仅更新通用字段，保留原 created_at
+          // Update: 仅更新通用字段
           const setClause = commonFields.map((f, i) => `"${f}" = $${i + 2}`).join(', ');
           const values = [body.id, ...commonFields.map(f => itemData[f])];
           
           const result = await db.query(
-            `UPDATE tea_items SET ${setClause} WHERE id = $1 RETURNING *`,
+            `UPDATE public.tea_items SET ${setClause} WHERE id = $1 RETURNING *`,
             values
           );
           return res.status(200).json({ data: result.rows[0] });
         } 
         else {
-          // Create: 包含 created_at，并使用事务确保日志一致性
+          // Create: 包含 created_at，并使用事务
           const client = await db.connect();
           try {
             await client.query('BEGIN');
@@ -81,7 +81,7 @@ export default async function handler(req, res) {
             const values = allFields.map(f => itemData[f]);
             
             const result = await client.query(
-              `INSERT INTO tea_items (${cols}) VALUES (${placeholders}) RETURNING *`,
+              `INSERT INTO public.tea_items (${cols}) VALUES (${placeholders}) RETURNING *`,
               values
             );
             
@@ -90,7 +90,7 @@ export default async function handler(req, res) {
             // 自动写入初始库存日志
             if (newItem && newItem.quantity > 0) {
                await client.query(
-                 `INSERT INTO inventory_logs (item_id, change_amount, current_balance, reason, note, created_at) VALUES ($1, $2, $3, $4, $5, $6)`,
+                 `INSERT INTO public.inventory_logs (item_id, change_amount, current_balance, reason, note, created_at) VALUES ($1, $2, $3, $4, $5, $6)`,
                  [newItem.id, newItem.quantity, newItem.quantity, 'INITIAL', '初始入库', Date.now()]
                );
             }
@@ -113,12 +113,12 @@ export default async function handler(req, res) {
           await client.query('BEGIN');
           
           await client.query(
-            `INSERT INTO inventory_logs (item_id, change_amount, current_balance, reason, note, created_at) VALUES ($1, $2, $3, $4, $5, $6)`,
+            `INSERT INTO public.inventory_logs (item_id, change_amount, current_balance, reason, note, created_at) VALUES ($1, $2, $3, $4, $5, $6)`,
             [body.id, body.changeAmount, body.newQuantity, body.reason, body.note, Date.now()]
           );
           
           const result = await client.query(
-            `UPDATE tea_items SET quantity = $1 WHERE id = $2 RETURNING *`,
+            `UPDATE public.tea_items SET quantity = $1 WHERE id = $2 RETURNING *`,
             [body.newQuantity, body.id]
           );
           
