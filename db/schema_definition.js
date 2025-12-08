@@ -7,10 +7,14 @@ create table if not exists public.users (
   id uuid default gen_random_uuid() primary key,
   username text unique not null,
   password_hash text not null,
+  nickname text default '藏家', -- 用户昵称
   role text default 'user', -- 'admin' or 'user'
   is_initial boolean default false, -- 是否为初始密码，如果是则强制修改
   created_at bigint default (extract(epoch from now()) * 1000)::bigint
 );
+
+-- 补丁: 补充 nickname 字段 (针对已有数据库)
+alter table public.users add column if not exists nickname text default '藏家';
 
 -- (已移除硬编码的 INSERT 语句，由 API 层的 admin 登录逻辑自动处理初始账户创建，以确保 Hash 准确性)
 

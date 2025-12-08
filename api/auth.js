@@ -41,13 +41,10 @@ export default async function handler(req, res) {
             if (check.rows.length === 0) {
                 // 情况A: 用户不存在，自动创建 (Hash for 'admin')
                 const hash = await bcrypt.hash('admin', 10);
-                await db.query("INSERT INTO public.users (username, password_hash, role, is_initial) VALUES ('admin', $1, 'admin', true)", [hash]);
+                await db.query("INSERT INTO public.users (username, password_hash, nickname, role, is_initial) VALUES ('admin', $1, '藏家', 'admin', true)", [hash]);
             } else {
                 // 情况B: 用户存在，检查是否是之前的错误数据 (Bad Hash Fix)
                 const user = check.rows[0];
-                // 之前的错误 Hash 长度或格式可能导致 bcrypt 无法比对。
-                // 如果密码是 'admin' 且 Hash 看起来像之前的占位符(长度不足或特定前缀)，或者验证失败但我们确定是初始状态
-                // 这里我们做一个安全网：如果 Hash 长度不对(标准bcrypt是60位) 或者 验证失败但密码是admin且标记为initial
                 const isStandardHash = user.password_hash && user.password_hash.length === 60;
                 
                 if (!isStandardHash) {
@@ -74,7 +71,13 @@ export default async function handler(req, res) {
         
         return res.status(200).json({ 
             token, 
-            user: { id: user.id, username: user.username, role: user.role, is_initial: user.is_initial } 
+            user: { 
+                id: user.id, 
+                username: user.username, 
+                nickname: user.nickname || '藏家', 
+                role: user.role, 
+                is_initial: user.is_initial 
+            } 
         });
     }
 
@@ -93,17 +96,26 @@ export default async function handler(req, res) {
         return res.status(200).json({ success: true });
     }
 
-    // 3. GET USERS (Admin Only)
+    // 3. UPDATE PROFILE (Self - Nickname)
+    if (method === 'POST' && req.query.action === 'update_profile') {
+        const { nickname } = req.body;
+        if (!nickname || nickname.trim() === '') return res.status(400).json({ error: '昵称不能为空' });
+        
+        await db.query('UPDATE public.users SET nickname = $1 WHERE id = $2', [nickname, currentUser.id]);
+        return res.status(200).json({ success: true, nickname });
+    }
+
+    // 4. GET USERS (Admin Only)
     if (method === 'GET' && req.query.action === 'list_users') {
         if (currentUser.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
-        const result = await db.query('SELECT id, username, role, created_at FROM public.users ORDER BY created_at ASC');
+        const result = await db.query('SELECT id, username, nickname, role, created_at FROM public.users ORDER BY created_at ASC');
         return res.status(200).json({ data: result.rows });
     }
 
-    // 4. CREATE USER (Admin Only)
+    // 5. CREATE USER (Admin Only)
     if (method === 'POST' && req.query.action === 'create_user') {
         if (currentUser.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
-        const { username, password } = req.body;
+        const { username, password, nickname } = req.body;
         
         if (!username || !password) return res.status(400).json({ error: '字段缺失' });
         
@@ -112,14 +124,27 @@ export default async function handler(req, res) {
         if (check.rows.length > 0) return res.status(400).json({ error: '用户名已存在' });
 
         const hash = await bcrypt.hash(password, 10);
+        const finalNickname = nickname && nickname.trim() ? nickname : '藏家';
+        
         const result = await db.query(
-            "INSERT INTO public.users (username, password_hash, role) VALUES ($1, $2, 'user') RETURNING id, username, role, created_at", 
-            [username, hash]
+            "INSERT INTO public.users (username, password_hash, nickname, role) VALUES ($1, $2, $3, 'user') RETURNING id, username, nickname, role, created_at", 
+            [username, hash, finalNickname]
         );
         return res.status(200).json({ data: result.rows[0] });
     }
 
-    // 5. DELETE USER (Admin Only)
+    // 6. UPDATE USER (Admin Only - Modify other user's nickname)
+    if (method === 'POST' && req.query.action === 'admin_update_user') {
+        if (currentUser.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+        const { id, nickname } = req.body;
+        
+        if (!id || !nickname) return res.status(400).json({ error: '参数缺失' });
+
+        await db.query('UPDATE public.users SET nickname = $1 WHERE id = $2', [nickname, id]);
+        return res.status(200).json({ success: true });
+    }
+
+    // 7. DELETE USER (Admin Only)
     if (method === 'POST' && req.query.action === 'delete_user') {
         if (currentUser.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
         const { id } = req.body;

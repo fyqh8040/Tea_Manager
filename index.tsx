@@ -49,7 +49,8 @@ import {
   User,
   Users,
   Shield,
-  Lock
+  Lock,
+  Edit2
 } from 'lucide-react';
 
 // --- Types ---
@@ -93,6 +94,7 @@ interface AppConfig {
 interface UserProfile {
     id: string;
     username: string;
+    nickname: string;
     role: 'admin' | 'user';
     is_initial: boolean;
 }
@@ -573,7 +575,7 @@ const App = () => {
         <header className="mb-10 flex flex-col md:flex-row md:items-end justify-between gap-6">
           <div className="flex-1">
             <h1 className="font-serif text-3xl md:text-4xl text-tea-900 mb-3 tracking-tight">
-              {greeting}，{user?.username}
+              {greeting}，{user?.nickname || user?.username}
             </h1>
             
             {!isConnected || dbError === 'TABLE_MISSING' ? (
@@ -771,6 +773,7 @@ const App = () => {
           isEnvLoading={isEnvLoading}
           onSave={setConfig}
           user={user}
+          setUser={setUser}
           onLogout={handleLogout}
           onChangePassword={() => setIsPasswordModalOpen(true)}
         />
@@ -794,6 +797,7 @@ const App = () => {
   );
 };
 
+// ... (LoginScreen, ChangePasswordModal remain mostly same)
 // --- Login Screen ---
 const LoginScreen = ({ onLogin }: any) => {
     const [username, setUsername] = useState('');
@@ -868,7 +872,6 @@ const LoginScreen = ({ onLogin }: any) => {
                                 <span>{error}</span>
                             </div>
                             
-                            {/* 检测到数据库表缺失错误 */}
                             {(error.includes('relation') || error.includes('does not exist')) && (
                                 <div className="pt-1 border-t border-red-100 mt-1">
                                     <p className="text-xs text-red-500 mb-2">检测到数据库结构缺失，请初始化。</p>
@@ -906,8 +909,8 @@ const LoginScreen = ({ onLogin }: any) => {
     );
 };
 
-// --- Password Change Modal ---
 const ChangePasswordModal = ({ isOpen, onClose, forced }: any) => {
+    // (Same as before)
     const [pass, setPass] = useState('');
     const [loading, setLoading] = useState(false);
 
@@ -922,7 +925,7 @@ const ChangePasswordModal = ({ isOpen, onClose, forced }: any) => {
             if(res.ok) {
                 alert('密码修改成功');
                 onClose();
-                if(forced) window.location.reload(); // Refresh to clear forced state
+                if(forced) window.location.reload(); 
             } else {
                 alert('修改失败');
             }
@@ -957,7 +960,9 @@ const ChangePasswordModal = ({ isOpen, onClose, forced }: any) => {
 const UserManagement = () => {
     const [users, setUsers] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
-    const [newUser, setNewUser] = useState({username: '', password: ''});
+    const [newUser, setNewUser] = useState({username: '', password: '', nickname: ''});
+    const [editingUserId, setEditingUserId] = useState<string | null>(null);
+    const [editNickname, setEditNickname] = useState('');
 
     const loadUsers = async () => {
         setLoading(true);
@@ -976,7 +981,7 @@ const UserManagement = () => {
             body: JSON.stringify(newUser)
         });
         if(res.ok) {
-            setNewUser({username:'', password:''});
+            setNewUser({username:'', password:'', nickname: ''});
             loadUsers();
         } else {
             const j = await res.json();
@@ -994,16 +999,40 @@ const UserManagement = () => {
         else alert('操作失败');
     };
 
+    const startEdit = (user: any) => {
+        setEditingUserId(user.id);
+        setEditNickname(user.nickname || '');
+    };
+
+    const saveEdit = async () => {
+        if (!editingUserId) return;
+        const res = await authFetch('/api/auth?action=admin_update_user', {
+            method: 'POST',
+            body: JSON.stringify({id: editingUserId, nickname: editNickname})
+        });
+        if (res.ok) {
+            setEditingUserId(null);
+            loadUsers();
+        } else {
+            alert('修改失败');
+        }
+    };
+
     useEffect(() => { loadUsers(); }, []);
 
     return (
         <div className="space-y-6">
             <div className="bg-tea-50 p-4 rounded-lg border border-tea-100">
                 <h4 className="font-bold text-sm mb-3 flex items-center gap-2"><Plus size={16}/> 新增用户</h4>
-                <form onSubmit={addUser} className="flex gap-2">
-                    <input className="flex-1 px-3 py-2 rounded border border-tea-200 text-sm" placeholder="用户名" value={newUser.username} onChange={e=>setNewUser({...newUser, username:e.target.value})} />
-                    <input className="flex-1 px-3 py-2 rounded border border-tea-200 text-sm" placeholder="初始密码" value={newUser.password} onChange={e=>setNewUser({...newUser, password:e.target.value})} />
-                    <Button type="submit" size="sm">添加</Button>
+                <form onSubmit={addUser} className="flex flex-col gap-2">
+                    <div className="flex gap-2">
+                        <input className="flex-1 px-3 py-2 rounded border border-tea-200 text-sm" placeholder="用户名" value={newUser.username} onChange={e=>setNewUser({...newUser, username:e.target.value})} required />
+                        <input className="flex-1 px-3 py-2 rounded border border-tea-200 text-sm" placeholder="初始密码" value={newUser.password} onChange={e=>setNewUser({...newUser, password:e.target.value})} required />
+                    </div>
+                    <div className="flex gap-2">
+                         <input className="flex-1 px-3 py-2 rounded border border-tea-200 text-sm" placeholder="昵称 (选填，默认为藏家)" value={newUser.nickname} onChange={e=>setNewUser({...newUser, nickname:e.target.value})} />
+                         <Button type="submit" size="sm" className="whitespace-nowrap">添加用户</Button>
+                    </div>
                 </form>
             </div>
 
@@ -1014,14 +1043,39 @@ const UserManagement = () => {
                             <div className={`w-8 h-8 rounded-full flex items-center justify-center ${u.role==='admin'?'bg-accent text-white':'bg-tea-200 text-tea-600'}`}>
                                 <User size={16}/>
                             </div>
-                            <div>
-                                <div className="font-bold text-sm text-tea-900">{u.username}</div>
+                            <div className="flex flex-col">
+                                <div className="flex items-center gap-2">
+                                    <span className="font-bold text-sm text-tea-900">{u.username}</span>
+                                    {editingUserId === u.id ? (
+                                        <div className="flex items-center gap-1">
+                                            <input 
+                                                className="border rounded px-1 py-0.5 text-xs w-24" 
+                                                value={editNickname} 
+                                                onChange={e => setEditNickname(e.target.value)}
+                                                autoFocus
+                                            />
+                                            <button onClick={saveEdit} className="text-green-600"><CheckCircle2 size={14}/></button>
+                                            <button onClick={() => setEditingUserId(null)} className="text-red-500"><X size={14}/></button>
+                                        </div>
+                                    ) : (
+                                        <span className="text-xs text-tea-500 bg-tea-50 px-1.5 rounded">{u.nickname || '藏家'}</span>
+                                    )}
+                                </div>
                                 <div className="text-xs text-tea-400">{u.role === 'admin' ? '管理员' : '普通用户'} · {new Date(u.created_at).toLocaleDateString()}</div>
                             </div>
                         </div>
-                        {u.role !== 'admin' && (
-                            <button onClick={()=>deleteUser(u.id)} className="p-2 text-tea-300 hover:text-red-500 transition-colors"><Trash2 size={16}/></button>
-                        )}
+                        <div className="flex gap-1">
+                            {editingUserId !== u.id && (
+                                <button onClick={() => startEdit(u)} className="p-2 text-tea-300 hover:text-accent transition-colors" title="修改昵称">
+                                    <Edit2 size={16}/>
+                                </button>
+                            )}
+                            {u.role !== 'admin' && (
+                                <button onClick={()=>deleteUser(u.id)} className="p-2 text-tea-300 hover:text-red-500 transition-colors" title="删除用户">
+                                    <Trash2 size={16}/>
+                                </button>
+                            )}
+                        </div>
                     </div>
                 ))}
             </div>
@@ -1031,11 +1085,31 @@ const UserManagement = () => {
 
 // ... (ItemModal, DbInitModal, InventoryManager remain same)
 
-const SettingsModal = ({ isOpen, onClose, config, serverConfig, isEnvLoading, onSave, user, onLogout, onChangePassword }: any) => {
+const SettingsModal = ({ isOpen, onClose, config, serverConfig, isEnvLoading, onSave, user, setUser, onLogout, onChangePassword }: any) => {
     const [localConfig, setLocalConfig] = useState(config);
     const [tab, setTab] = useState<'SYSTEM' | 'USERS'>('SYSTEM');
+    const [nickname, setNickname] = useState(user?.nickname || '');
+    const [isEditingNick, setIsEditingNick] = useState(false);
 
     useEffect(() => { setLocalConfig(config); }, [config]);
+    useEffect(() => { if(user) setNickname(user.nickname || ''); }, [user]);
+
+    const handleUpdateNickname = async () => {
+        if (!nickname.trim()) return alert('昵称不能为空');
+        const res = await authFetch('/api/auth?action=update_profile', {
+            method: 'POST',
+            body: JSON.stringify({ nickname })
+        });
+        if (res.ok) {
+            const data = await res.json();
+            const updatedUser = { ...user, nickname: data.nickname };
+            setUser(updatedUser);
+            localStorage.setItem('tea_user', JSON.stringify(updatedUser));
+            setIsEditingNick(false);
+        } else {
+            alert('修改失败');
+        }
+    };
 
     if (!isOpen) return null;
 
@@ -1064,16 +1138,35 @@ const SettingsModal = ({ isOpen, onClose, config, serverConfig, isEnvLoading, on
                         <div className="space-y-6">
                             {/* Profile Section */}
                             <div className="bg-tea-50 p-4 rounded-lg border border-tea-100 flex justify-between items-center">
-                                <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-tea-600 shadow-sm border border-tea-200">
+                                <div className="flex items-center gap-3 w-full">
+                                    <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-tea-600 shadow-sm border border-tea-200 shrink-0">
                                         <User size={20}/>
                                     </div>
-                                    <div>
-                                        <div className="font-bold text-tea-900">当前用户: {user?.username}</div>
+                                    <div className="flex-1">
+                                        <div className="font-bold text-tea-900 flex items-center gap-2">
+                                            {isEditingNick ? (
+                                                <div className="flex items-center gap-2">
+                                                    <input 
+                                                        className="px-2 py-1 text-sm border rounded w-32"
+                                                        value={nickname}
+                                                        onChange={e => setNickname(e.target.value)}
+                                                        autoFocus
+                                                    />
+                                                    <button onClick={handleUpdateNickname} className="text-green-600 hover:bg-green-100 p-1 rounded"><CheckCircle2 size={16}/></button>
+                                                    <button onClick={() => { setIsEditingNick(false); setNickname(user.nickname); }} className="text-tea-400 hover:bg-tea-200 p-1 rounded"><X size={16}/></button>
+                                                </div>
+                                            ) : (
+                                                <>
+                                                    {user?.nickname || '藏家'} 
+                                                    <span className="text-xs font-normal text-tea-400">({user?.username})</span>
+                                                    <button onClick={() => setIsEditingNick(true)} className="text-tea-300 hover:text-accent"><Edit2 size={14}/></button>
+                                                </>
+                                            )}
+                                        </div>
                                         <div className="text-xs text-tea-500">角色: {user?.role === 'admin' ? '管理员' : '普通用户'}</div>
                                     </div>
                                 </div>
-                                <div className="flex gap-2">
+                                <div className="flex gap-2 shrink-0">
                                     <Button size="sm" variant="secondary" onClick={onChangePassword}>修改密码</Button>
                                     <Button size="sm" variant="danger" onClick={onLogout}><LogOut size={14}/> 退出</Button>
                                 </div>
