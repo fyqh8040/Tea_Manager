@@ -34,21 +34,40 @@ export default async function handler(req, res) {
     if (method === 'POST' && req.query.action === 'login') {
         const { username, password } = req.body;
         
-        // 特殊处理：如果是第一次初始化，admin 可能不存在（如果是手动 SQL 建表可能 hash 不对）
-        // 这里做一个自动纠错：如果 admin 不存在，自动创建默认 admin/admin
+        // 特殊处理：针对 admin 用户
         if (username === 'admin') {
             const check = await db.query('SELECT * FROM public.users WHERE username = $1', ['admin']);
+            
             if (check.rows.length === 0) {
+                // 情况A: 用户不存在，自动创建 (Hash for 'admin')
                 const hash = await bcrypt.hash('admin', 10);
                 await db.query("INSERT INTO public.users (username, password_hash, role, is_initial) VALUES ('admin', $1, 'admin', true)", [hash]);
+            } else {
+                // 情况B: 用户存在，检查是否是之前的错误数据 (Bad Hash Fix)
+                const user = check.rows[0];
+                // 之前的错误 Hash 长度或格式可能导致 bcrypt 无法比对。
+                // 如果密码是 'admin' 且 Hash 看起来像之前的占位符(长度不足或特定前缀)，或者验证失败但我们确定是初始状态
+                // 这里我们做一个安全网：如果 Hash 长度不对(标准bcrypt是60位) 或者 验证失败但密码是admin且标记为initial
+                const isStandardHash = user.password_hash && user.password_hash.length === 60;
+                
+                if (!isStandardHash) {
+                    console.log('Detected invalid admin hash, auto-fixing...');
+                    const newHash = await bcrypt.hash('admin', 10);
+                    await db.query("UPDATE public.users SET password_hash = $1 WHERE id = $2", [newHash, user.id]);
+                }
             }
         }
 
         const result = await db.query('SELECT * FROM public.users WHERE username = $1', [username]);
         const user = result.rows[0];
 
-        if (!user || !(await bcrypt.compare(password, user.password_hash))) {
-            return res.status(401).json({ error: '用户名或密码错误' });
+        if (!user) {
+            return res.status(401).json({ error: '用户名不存在' });
+        }
+
+        const isValid = await bcrypt.compare(password, user.password_hash);
+        if (!isValid) {
+            return res.status(401).json({ error: '密码错误' });
         }
 
         const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: '7d' });

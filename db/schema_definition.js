@@ -12,15 +12,7 @@ create table if not exists public.users (
   created_at bigint default (extract(epoch from now()) * 1000)::bigint
 );
 
--- 初始化默认管理员 (密码: admin)
--- bcrypt hash for 'admin' is typically needed. 
--- Here we use a placeholder or insert via API logic, but for pure SQL init we try to insert if empty.
--- 注意: 为了确保安全性，实际生产环境应在代码中处理 Hash，这里仅为 SQL 初始化演示结构。
--- 下面的 Hash 是 'admin' 的 bcrypt hash (cost 10)
-insert into public.users (username, password_hash, role, is_initial)
-select 'admin', '$2a$10$X7V.2e.9.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1', 'admin', true
-where not exists (select 1 from public.users where username = 'admin');
-
+-- (已移除硬编码的 INSERT 语句，由 API 层的 admin 登录逻辑自动处理初始账户创建，以确保 Hash 准确性)
 
 -- 2. 创建核心藏品表
 create table if not exists public.tea_items (
