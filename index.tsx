@@ -5,7 +5,7 @@ import {
   Camera, Upload, Leaf, Coffee, ChevronDown, Trash2, 
   Plus, Search, Settings, LogOut, User, Package, History,
   Database, Shield, Lock, Edit2, Loader2, CheckCircle2,
-  AlertTriangle, Coins, AlertCircle, Menu, X
+  AlertTriangle, Coins, AlertCircle, Menu, X, Cloud
 } from 'lucide-react';
 
 // --- Types ---
@@ -1007,7 +1007,7 @@ const InventoryManager = ({ item, logs, isLoading, onUpdate }: any) => {
     );
 };
 
-const SettingsModal = ({ isOpen, onClose, user, setUser, onLogout, onChangePassword, onDbError }: any) => {
+const SettingsModal = ({ isOpen, onClose, user, setUser, onLogout, onChangePassword, onDbError, config }: any) => {
     const [tab, setTab] = useState<'SYSTEM' | 'USERS'>('SYSTEM');
     const [nickname, setNickname] = useState(user?.nickname || '');
     const [isEditingNick, setIsEditingNick] = useState(false);
@@ -1056,6 +1056,24 @@ const SettingsModal = ({ isOpen, onClose, user, setUser, onLogout, onChangePassw
                                     <Button size="sm" variant="danger" onClick={onLogout}><LogOut size={14}/> 退出</Button>
                                 </div>
                             </div>
+                            <div>
+                                <h4 className="text-xs font-bold text-tea-400 uppercase tracking-wider mb-3">环境状态</h4>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div className="p-3 border border-tea-100 rounded-lg flex items-center justify-between">
+                                        <div className="flex items-center gap-2 text-sm text-tea-600">
+                                            <Database size={16}/> <span>数据库</span>
+                                        </div>
+                                        {config?.hasServerDb ? <span className="text-xs text-green-600 font-bold bg-green-50 px-2 py-0.5 rounded">已连接</span> : <span className="text-xs text-amber-500 font-bold bg-amber-50 px-2 py-0.5 rounded">未配置</span>}
+                                    </div>
+                                    <div className="p-3 border border-tea-100 rounded-lg flex items-center justify-between">
+                                        <div className="flex items-center gap-2 text-sm text-tea-600">
+                                            <Cloud size={16}/> <span>图床 API</span>
+                                        </div>
+                                        {config?.imageApiUrl ? <span className="text-xs text-green-600 font-bold bg-green-50 px-2 py-0.5 rounded">自定义</span> : <span className="text-xs text-tea-400 font-bold bg-tea-50 px-2 py-0.5 rounded">默认</span>}
+                                    </div>
+                                </div>
+                                <p className="text-[10px] text-tea-300 mt-2 text-center">Version 1.2.0 • Tea Collection</p>
+                            </div>
                         </div>
                     )}
                 </div>
@@ -1067,6 +1085,8 @@ const SettingsModal = ({ isOpen, onClose, user, setUser, onLogout, onChangePassw
 const UserManagement = ({ onDbError }: any) => {
     const [users, setUsers] = useState<any[]>([]);
     const [newUser, setNewUser] = useState({username: '', password: '', nickname: ''});
+    const [editId, setEditId] = useState<string|null>(null);
+    const [editNick, setEditNick] = useState('');
 
     const loadUsers = async () => {
         const res = await authFetch('/api/auth?action=list_users');
@@ -1086,6 +1106,16 @@ const UserManagement = ({ onDbError }: any) => {
         if(!confirm('确定删除该用户吗？')) return;
         const res = await authFetch('/api/auth?action=delete_user', { method: 'POST', body: JSON.stringify({id}) });
         if(res.ok) loadUsers();
+    };
+
+    const startEdit = (u: any) => { setEditId(u.id); setEditNick(u.nickname); };
+    const cancelEdit = () => { setEditId(null); setEditNick(''); };
+    
+    const saveEdit = async (id: string) => {
+        if (!editNick.trim()) return;
+        const res = await authFetch('/api/auth?action=admin_update_user', { method: 'POST', body: JSON.stringify({id, nickname: editNick}) });
+        if(res.ok) { loadUsers(); cancelEdit(); }
+        else alert('更新失败');
     };
 
     return (
@@ -1109,7 +1139,20 @@ const UserManagement = ({ onDbError }: any) => {
                         <div className="flex items-center gap-3">
                             <div className={`w-8 h-8 rounded-full flex items-center justify-center ${u.role==='admin'?'bg-accent text-white':'bg-tea-200 text-tea-600'}`}><User size={16}/></div>
                             <div>
-                                <div className="font-bold text-sm text-tea-900">{u.username} <span className="font-normal text-tea-500">({u.nickname})</span></div>
+                                <div className="font-bold text-sm text-tea-900 flex items-center gap-2">
+                                    {u.username} 
+                                    {editId === u.id ? (
+                                        <div className="flex items-center gap-1 animate-in fade-in zoom-in duration-200">
+                                            <input className="w-20 px-1 py-0.5 text-xs border rounded bg-white" value={editNick} onChange={e=>setEditNick(e.target.value)} autoFocus />
+                                            <button onClick={()=>saveEdit(u.id)} className="text-green-600 hover:bg-green-50 p-0.5 rounded"><CheckCircle2 size={14}/></button>
+                                            <button onClick={cancelEdit} className="text-red-400 hover:bg-red-50 p-0.5 rounded"><X size={14}/></button>
+                                        </div>
+                                    ) : (
+                                        <span className="font-normal text-tea-500 cursor-pointer hover:text-accent flex items-center gap-1" onClick={()=>startEdit(u)}>
+                                            ({u.nickname}) <Edit2 size={10} className="opacity-0 group-hover:opacity-100 transition-opacity"/>
+                                        </span>
+                                    )}
+                                </div>
                                 <div className="text-xs text-tea-400">{u.role}</div>
                             </div>
                         </div>
