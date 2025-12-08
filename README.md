@@ -20,7 +20,7 @@
     *   **普通藏家**：拥有独立的数据空间，数据互不可见。
 *   **全自动初始化**：利用后端直连数据库能力，内置迁移脚本，无需手动执行 SQL，通过界面即可一键修复/创建数据库表结构。
 *   **智能联想**：输入产地或分类时提供智能补全（如：易武、景德镇、紫砂壶等）。
-*   **图床支持**：默认支持 Base64 数据库存储，同时兼容 [CFBED](https://github.com/cfbed/cfbed) 等外部图床 API。
+*   **图床支持**：默认支持 Base64 数据库存储，同时兼容 [CloudFlare-ImgBed](https://github.com/MarSeventh/CloudFlare-ImgBed) 等外部图床 API。
 *   **移动端适配**：完美适配手机与桌面端，随时随地查看藏品。
 
 ---
@@ -66,16 +66,25 @@ Supabase 提供两种连接方式。本项目利用后端直连能力实现了**
 
 | 变量名 | 必填 | 说明 | 示例值 |
 | :--- | :---: | :--- | :--- |
-| `DATABASE_URL` | ✅ | **核心配置**：PostgreSQL 连接字符串。用于后端 API 直连数据库。 | `postgres://postgres:[PWD]@db.xxx.supabase.co:6543/postgres` |
-| `JWT_SECRET` | ✅ | **安全配置**：Token 加密密钥。**未配置时系统将使用默认的不安全密钥，生产环境请务必设置**（随意输入一长串字符即可）。 | `my-super-secret-key-123456` |
+| `DATABASE_URL` | ✅ | **核心配置 (后端)**：PostgreSQL 连接字符串。用于后端 API 直连数据库。 | `postgres://postgres:[PWD]@db.xxx.supabase.co:6543/postgres` |
+| `JWT_SECRET` | ✅ | **安全配置**：Token 加密密钥。**生产环境请务必设置**。 | `my-super-secret-key-123456` |
 
-#### 图床配置 (可选 - 推荐 CFBED)
+#### Supabase SDK 配置 (可选 - 推荐)
 
-如果不配置以下参数，图片将以 Base64 格式直接存入数据库（适合轻量使用）。如需对接 [CFBED](https://github.com/cfbed/cfbed) 等图床以获得更好的性能：
+虽然核心功能使用后端直连，但配置以下参数可消除前端控制台警告，并为未来扩展（如使用 Supabase Storage 存储图片）做准备。
 
 | 变量名 | 说明 | 示例值 |
 | :--- | :--- | :--- |
-| `NEXT_PUBLIC_IMAGE_API_URL` | 图床上传接口地址 | `https://your-cfbed-domain.com/api/upload` |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase 项目 API 地址 (Project Settings -> API) | `https://your-project.supabase.co` |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase 项目匿名公钥 (Project Settings -> API) | `eyJxh...` |
+
+#### 图床配置 (可选 - 推荐 CloudFlare-ImgBed)
+
+如果不配置以下参数，图片将以 Base64 格式直接存入数据库（适合轻量使用）。如需对接 [CloudFlare-ImgBed](https://github.com/MarSeventh/CloudFlare-ImgBed) 等图床以获得更好的性能：
+
+| 变量名 | 说明 | 示例值 |
+| :--- | :--- | :--- |
+| `NEXT_PUBLIC_IMAGE_API_URL` | 图床上传接口地址 | `https://your-cf-worker.workers.dev/upload` |
 | `NEXT_PUBLIC_IMAGE_API_TOKEN` | 图床上传 Token | `your-token-here` |
 
 5.  点击 **Deploy** 等待部署完成。
@@ -109,7 +118,7 @@ Supabase 提供两种连接方式。本项目利用后端直连能力实现了**
 
 本项目的部分灵感与技术实现得益于开源社区的无私贡献，特别感谢：
 
-*   **[CFBED](https://github.com/cfbed/cfbed)**: 由 **[Talks](https://github.com/talksj)** 开发的基于 Cloudflare Workers 的开源图床方案。
+*   **[CloudFlare-ImgBed](https://github.com/MarSeventh/CloudFlare-ImgBed)**: 开源图床方案。
 
 ---
 
