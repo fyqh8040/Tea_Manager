@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
@@ -43,7 +42,8 @@ import {
   Scale,
   Coins,
   Banknote,
-  TrendingUp
+  TrendingUp,
+  Quote
 } from 'lucide-react';
 
 // --- Types ---
@@ -87,6 +87,19 @@ interface AppConfig {
 
 const TEA_UNITS = ['克 (g)', '千克 (kg)', '饼', '砖', '沱', '盒', '罐', '袋', '泡'];
 const TEAWARE_UNITS = ['件', '套', '个', '把', '只', '组'];
+
+const TEA_QUOTES = [
+    "茶亦醉人何必酒，书能香我无须花。",
+    "一碗喉吻润，二碗破孤闷。",
+    "半壁山房待明月，一盏清茗酬知音。",
+    "且将新火试新茶，诗酒趁年华。",
+    "寒夜客来茶当酒，竹炉汤沸火初红。",
+    "赌书消得泼茶香，当时只道是寻常。",
+    "从来佳茗似佳人。",
+    "琴里知闻唯渌水，茶中故旧是蒙山。",
+    "小鼎煎茶面曲池，白须道士竹间棋。",
+    "汲来江水烹新茗，买尽青山当画屏。"
+];
 
 const formatReason = (reason: string, changeAmount: number = 0) => {
   switch (reason) {
@@ -165,32 +178,33 @@ const TextArea = ({ label, ...props }: any) => (
   </div>
 );
 
-const Badge = ({ children, color = 'tea' }: any) => {
+const Badge = ({ children, color = 'tea', className = '' }: any) => {
   const colors = {
     tea: "bg-tea-100 text-tea-700",
-    accent: "bg-accent-light/30 text-accent-dark",
-    clay: "bg-orange-100 text-orange-800",
+    accent: "bg-accent text-white shadow-sm shadow-accent/30",
+    clay: "bg-[#a67b5b] text-white shadow-sm shadow-[#a67b5b]/30",
     red: "bg-red-100 text-red-700",
     green: "bg-green-100 text-green-700",
     blue: "bg-blue-100 text-blue-700",
-    gold: "bg-yellow-50 text-yellow-700 border border-yellow-200"
+    gold: "bg-amber-50 text-amber-700 border border-amber-200",
+    dark: "bg-black/60 text-white backdrop-blur-sm"
   };
   return (
-    <span className={`px-2 py-0.5 rounded text-xs font-medium ${colors[color as keyof typeof colors]}`}>
+    <span className={`px-2 py-0.5 rounded text-xs font-medium ${colors[color as keyof typeof colors]} ${className}`}>
       {children}
     </span>
   );
 };
 
 const StatCard = ({ icon, label, value, subtext }: any) => (
-    <div className="bg-white/60 backdrop-blur-md border border-tea-100 rounded-xl p-4 flex items-center gap-4 shadow-sm">
-        <div className="w-10 h-10 rounded-full bg-accent/10 flex items-center justify-center text-accent">
+    <div className="bg-white/60 backdrop-blur-md border border-tea-100 rounded-xl px-4 py-3 flex items-center gap-3 shadow-sm min-w-[140px]">
+        <div className="w-10 h-10 rounded-full bg-tea-50 flex items-center justify-center text-accent shrink-0">
             {icon}
         </div>
         <div>
-            <div className="text-xs text-tea-500 font-medium uppercase tracking-wider">{label}</div>
-            <div className="text-lg font-bold text-tea-900 font-serif">{value}</div>
-            {subtext && <div className="text-xs text-tea-400">{subtext}</div>}
+            <div className="text-[10px] text-tea-500 font-bold uppercase tracking-wider">{label}</div>
+            <div className="text-lg font-bold text-tea-900 font-serif leading-tight">{value}</div>
+            {subtext && <div className="text-[10px] text-tea-400 scale-90 origin-left">{subtext}</div>}
         </div>
     </div>
 );
@@ -300,6 +314,11 @@ const App = () => {
     if (hour < 13) return '午安';
     if (hour < 18) return '午后好';
     return '晚上好';
+  }, []);
+
+  // Random Quote Logic
+  const quote = useMemo(() => {
+    return TEA_QUOTES[Math.floor(Math.random() * TEA_QUOTES.length)];
   }, []);
 
   // Stats
@@ -613,34 +632,44 @@ const App = () => {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 pt-24">
         
-        {/* Header with Stats */}
-        <header className="mb-8">
-          <h1 className="font-serif text-3xl md:text-4xl text-tea-900 mb-4">
-            {greeting}，藏家
-          </h1>
-          
-          {!isConnected || dbError === 'TABLE_MISSING' ? (
-              <p className="text-tea-500 max-w-xl leading-relaxed">
-                {!isConnected
-                  ? "系统未连接到云端。请点击右上角设置图标，配置数据库连接。" 
-                  : <span className="text-red-500 flex items-center gap-2 font-medium bg-red-50 px-2 py-0.5 rounded-md inline-block mt-1"><AlertTriangle size={16}/> 数据库尚未初始化</span>
-                }
-              </p>
-          ) : (
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mt-6 max-w-2xl">
-                <StatCard 
-                    icon={<Package size={20} />} 
-                    label="藏品总数" 
-                    value={stats.totalItems} 
-                    subtext="件/套"
-                />
-                <StatCard 
-                    icon={<Coins size={20} />} 
-                    label="资产总值" 
-                    value={formatCurrency(stats.totalValue)} 
-                    subtext="估算价值"
-                />
-            </div>
+        {/* New Header Layout */}
+        <header className="mb-10 flex flex-col md:flex-row md:items-end justify-between gap-6">
+          <div className="flex-1">
+            <h1 className="font-serif text-3xl md:text-4xl text-tea-900 mb-3 tracking-tight">
+              {greeting}，藏家
+            </h1>
+            
+            {!isConnected || dbError === 'TABLE_MISSING' ? (
+                <p className="text-tea-500 max-w-xl leading-relaxed">
+                  {!isConnected
+                    ? "系统未连接到云端。请点击右上角设置图标，配置数据库连接。" 
+                    : <span className="text-red-500 flex items-center gap-2 font-medium bg-red-50 px-2 py-0.5 rounded-md inline-block mt-1"><AlertTriangle size={16}/> 数据库尚未初始化</span>
+                  }
+                </p>
+            ) : (
+              <div className="text-tea-600 font-serif italic flex items-center gap-2 text-sm md:text-base opacity-80">
+                  <span className="w-6 h-[1px] bg-accent/50 inline-block"></span>
+                  {quote}
+              </div>
+            )}
+          </div>
+
+          {/* Right Side Stats */}
+          {isConnected && !dbError && (
+             <div className="flex gap-3 overflow-x-auto pb-1 md:pb-0 no-scrollbar">
+                  <StatCard 
+                      icon={<Package size={18} />} 
+                      label="藏品总数" 
+                      value={stats.totalItems} 
+                      subtext="件/套"
+                  />
+                  <StatCard 
+                      icon={<Coins size={18} />} 
+                      label="资产总值" 
+                      value={formatCurrency(stats.totalValue)} 
+                      subtext="估算价值"
+                  />
+             </div>
           )}
         </header>
 
@@ -701,14 +730,14 @@ const App = () => {
             </div>
         )}
 
-        {/* Grid */}
+        {/* Grid (New Card Design) */}
         {!isLoading && !dbError && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {filteredItems.map(item => (
             <div 
               key={item.id}
               onClick={() => { setEditingItem(item); setIsModalOpen(true); }}
-              className="group bg-white rounded-xl overflow-hidden shadow-sm hover:shadow-xl transition-all duration-300 cursor-pointer border border-tea-100 flex flex-col h-full"
+              className="group bg-white rounded-xl overflow-hidden shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer border border-tea-100 flex flex-col h-full"
             >
               <div className="relative aspect-[4/3] bg-tea-100 overflow-hidden">
                 {item.image_url ? (
@@ -722,39 +751,54 @@ const App = () => {
                     <ImageIcon size={32} />
                   </div>
                 )}
-                <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-4">
-                  <p className="text-white text-sm font-medium">点击查看详情</p>
+                <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                
+                {/* Top Labels: Type & Qty */}
+                <div className="absolute top-3 left-3">
+                    <Badge color={item.type === 'TEA' ? 'accent' : 'clay'} className="shadow-lg">
+                        {item.type === 'TEA' ? '茶' : '器'}
+                    </Badge>
                 </div>
-                <div className="absolute top-3 right-3 flex gap-2">
-                   <Badge color="tea">
-                      {item.quantity} {item.unit || '件'}
+                <div className="absolute top-3 right-3">
+                   <Badge color="dark">
+                      {item.quantity} {item.unit}
                    </Badge>
-                   {item.price && item.price > 0 && (
-                      <Badge color="gold">
-                         ¥{item.price}
-                      </Badge>
-                   )}
                 </div>
               </div>
               
               <div className="p-4 flex flex-col flex-1">
-                <div className="flex justify-between items-start mb-2">
-                  <h3 className="font-serif text-lg font-bold text-tea-900 line-clamp-1">{item.name}</h3>
-                   <div className="flex-shrink-0">
-                      <Badge color={item.type === 'TEA' ? 'accent' : 'clay'}>
-                        {item.type === 'TEA' ? '茶' : '器'}
-                      </Badge>
+                {/* Title & Year Row */}
+                <div className="flex justify-between items-baseline mb-2 gap-2">
+                  <h3 className="font-serif text-lg font-bold text-tea-900 truncate">{item.name}</h3>
+                  {item.year && <span className="text-xs text-tea-400 shrink-0 font-medium">{item.year}</span>}
+                </div>
+                
+                {/* Attributes Row */}
+                <div className="flex items-center gap-2 text-xs text-tea-500 mb-4">
+                  <span className="bg-tea-50 px-1.5 py-0.5 rounded text-tea-600">{item.category}</span>
+                  {item.origin && (
+                      <>
+                        <span className="text-tea-300">|</span>
+                        <span>{item.origin}</span>
+                      </>
+                  )}
+                </div>
+                
+                {/* Bottom Row: Price & Date */}
+                <div className="mt-auto pt-3 border-t border-tea-50 flex items-center justify-between">
+                   <div className="flex items-baseline gap-1">
+                      {item.price && item.price > 0 ? (
+                        <>
+                            <span className="text-[10px] text-amber-700 font-medium">¥</span>
+                            <span className="text-lg font-bold text-amber-700 font-serif">{item.price.toLocaleString()}</span>
+                        </>
+                      ) : (
+                        <span className="text-xs text-tea-300">--</span>
+                      )}
                    </div>
-                </div>
-                
-                <div className="flex items-center gap-2 text-xs text-tea-500 mb-3">
-                  <span className="bg-tea-50 px-2 py-0.5 rounded border border-tea-100">{item.category}</span>
-                  {item.year && <span>{item.year}</span>}
-                </div>
-                
-                <div className="mt-auto pt-3 border-t border-tea-50 flex items-center justify-between text-xs text-tea-400">
-                  <span>{item.origin || '未知产地'}</span>
-                  <span>{new Date(item.created_at).toLocaleDateString()}</span>
+                  <span className="text-[10px] text-tea-300">
+                      {new Date(item.created_at).toLocaleDateString()}
+                  </span>
                 </div>
               </div>
             </div>
@@ -1307,8 +1351,7 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, onStockUpdate, con
 };
 
 const SettingsModal = ({ isOpen, onClose, config, serverConfig, isEnvLoading, onSave }: any) => {
-  const [localConfig, setLocalConfig] = useState<AppConfig>(config);
-  const [showSecrets, setShowSecrets] = useState(false);
+  const [localConfig, setLocalConfig] = useState(config);
 
   useEffect(() => {
     setLocalConfig(config);
@@ -1322,98 +1365,82 @@ const SettingsModal = ({ isOpen, onClose, config, serverConfig, isEnvLoading, on
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-stone-900/40 backdrop-blur-sm" onClick={onClose} />
       <div className="bg-white rounded-xl w-full max-w-lg p-6 relative shadow-2xl animate-in fade-in zoom-in-95 duration-200">
         <div className="flex justify-between items-center mb-6">
-          <h2 className="font-serif text-xl font-bold text-tea-900 flex items-center gap-2">
-            <Settings className="text-tea-400" /> 设置
-          </h2>
-          <button onClick={onClose}><X size={20} className="text-tea-400" /></button>
+           <h2 className="font-serif text-xl font-bold text-tea-900 flex items-center gap-2">
+              <Settings className="text-tea-400"/> 系统设置
+           </h2>
+           <button onClick={onClose}><X size={24} className="text-tea-400 hover:text-tea-600" /></button>
         </div>
 
         <div className="space-y-6 max-h-[70vh] overflow-y-auto pr-2">
-          {/* Server Status Section */}
-          <div className="bg-tea-50 p-4 rounded-lg border border-tea-100">
-            <h3 className="font-bold text-tea-800 text-sm mb-2 flex items-center gap-2">
-              <Server size={14}/> 服务端状态
-            </h3>
-            {isEnvLoading ? (
-              <div className="flex items-center gap-2 text-tea-500 text-xs">
-                <Loader2 size={12} className="animate-spin"/> 正在检测环境...
-              </div>
-            ) : (
-              <div className="space-y-2 text-xs">
-                 <div className="flex items-center justify-between">
-                    <span className="text-tea-600">PostgreSQL 数据库</span>
-                    {serverConfig?.hasServerDb ? (
-                        <span className="text-green-600 flex items-center gap-1 font-medium"><CheckCircle2 size={12}/> 已连接</span>
-                    ) : (
-                        <span className="text-tea-400 flex items-center gap-1">未配置 (仅客户端模式)</span>
-                    )}
-                 </div>
-                 <div className="flex items-center justify-between">
-                    <span className="text-tea-600">服务端 API</span>
-                    <span className="text-green-600 flex items-center gap-1 font-medium"><CheckCircle2 size={12}/> 正常</span>
-                 </div>
-              </div>
-            )}
-          </div>
-
-          {/* Connection Config */}
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-                <h3 className="font-bold text-tea-800 text-sm">连接配置</h3>
-                <button 
-                  onClick={() => setShowSecrets(!showSecrets)}
-                  className="text-xs text-accent hover:underline"
-                >
-                  {showSecrets ? '隐藏密钥' : '显示密钥'}
-                </button>
+            
+            {/* Server Status Section */}
+            <div className={`p-4 rounded-lg border ${serverConfig?.hasServerDb ? 'bg-green-50 border-green-100' : 'bg-gray-50 border-gray-100'}`}>
+                <div className="flex items-center gap-3">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${serverConfig?.hasServerDb ? 'bg-green-200 text-green-700' : 'bg-gray-200 text-gray-500'}`}>
+                        <Server size={16}/>
+                    </div>
+                    <div>
+                        <h4 className="font-bold text-sm text-tea-900">服务端数据库 (Vercel Postgres)</h4>
+                        <div className="flex items-center gap-2 text-xs mt-0.5">
+                            {isEnvLoading ? (
+                                <span className="text-tea-400 flex items-center gap-1"><Loader2 size={10} className="animate-spin"/> 检测中...</span>
+                            ) : serverConfig?.hasServerDb ? (
+                                <span className="text-green-600 font-medium flex items-center gap-1"><CheckCircle2 size={12}/> 已连接</span>
+                            ) : (
+                                <span className="text-gray-500">未检测到环境变量配置</span>
+                            )}
+                        </div>
+                    </div>
+                </div>
             </div>
 
-            <Input 
-                label="Supabase URL" 
-                placeholder="https://xyz.supabase.co" 
-                value={localConfig.supabaseUrl}
-                onChange={(e: any) => setLocalConfig({...localConfig, supabaseUrl: e.target.value})}
-                disabled={!!serverConfig?.supabaseUrl} 
-                rightLabel={serverConfig?.supabaseUrl ? <span className="text-[10px] text-green-600 bg-green-50 px-1 rounded">已由环境变量托管</span> : null}
-            />
-            
-            <Input 
-                label="Supabase Anon Key" 
-                placeholder="eyJh..." 
-                type={showSecrets ? "text" : "password"}
-                value={localConfig.supabaseKey}
-                onChange={(e: any) => setLocalConfig({...localConfig, supabaseKey: e.target.value})}
-                disabled={!!serverConfig?.supabaseKey}
-                rightLabel={serverConfig?.supabaseKey ? <span className="text-[10px] text-green-600 bg-green-50 px-1 rounded">已由环境变量托管</span> : null}
-            />
-          </div>
+            {/* Supabase Config */}
+            <div className="space-y-3">
+                 <h3 className="text-sm font-bold text-tea-900 border-l-4 border-accent pl-2">Client-side Supabase (可选)</h3>
+                 <p className="text-xs text-tea-500">如果未配置服务端数据库，可直接在前端连接 Supabase。</p>
+                 <Input 
+                    label="Project URL" 
+                    value={localConfig.supabaseUrl} 
+                    onChange={(e: any) => setLocalConfig({...localConfig, supabaseUrl: e.target.value})} 
+                    placeholder="https://xxx.supabase.co"
+                    prefixicon={<Cloud size={14}/>}
+                 />
+                 <Input 
+                    label="Anon Key" 
+                    type="password"
+                    value={localConfig.supabaseKey} 
+                    onChange={(e: any) => setLocalConfig({...localConfig, supabaseKey: e.target.value})} 
+                    placeholder="eyJhbGciOiJIUzI1NiIsInR..."
+                    prefixicon={<Key size={14}/>}
+                 />
+            </div>
 
-          {/* Image Upload Config */}
-          <div className="space-y-4 pt-4 border-t border-tea-50">
-             <h3 className="font-bold text-tea-800 text-sm">图床配置 (可选)</h3>
-             <Input 
-                label="Upload API URL" 
-                placeholder="https://api.example.com/upload" 
-                value={localConfig.imageApiUrl}
-                onChange={(e: any) => setLocalConfig({...localConfig, imageApiUrl: e.target.value})}
-            />
-            <Input 
-                label="Token / Key" 
-                placeholder="Bearer ..." 
-                type={showSecrets ? "text" : "password"}
-                value={localConfig.imageApiToken}
-                onChange={(e: any) => setLocalConfig({...localConfig, imageApiToken: e.target.value})}
-            />
-          </div>
+            {/* Image API Config */}
+            <div className="space-y-3 pt-4 border-t border-tea-50">
+                 <h3 className="text-sm font-bold text-tea-900 border-l-4 border-accent pl-2">图片上传服务</h3>
+                 <Input 
+                    label="Upload API URL" 
+                    value={localConfig.imageApiUrl} 
+                    onChange={(e: any) => setLocalConfig({...localConfig, imageApiUrl: e.target.value})} 
+                    placeholder="https://api.example.com/upload"
+                 />
+                 <Input 
+                    label="Auth Token" 
+                    type="password"
+                    value={localConfig.imageApiToken} 
+                    onChange={(e: any) => setLocalConfig({...localConfig, imageApiToken: e.target.value})} 
+                    placeholder="Bearer token..."
+                 />
+            </div>
         </div>
 
         <div className="mt-6 pt-4 border-t border-tea-50 flex justify-end gap-3">
-           <Button variant="secondary" onClick={onClose}>取消</Button>
-           <Button onClick={handleSave}><Save size={16}/> 保存配置</Button>
+             <Button variant="secondary" onClick={onClose}>取消</Button>
+             <Button onClick={handleSave}>保存配置</Button>
         </div>
       </div>
     </div>
@@ -1423,85 +1450,98 @@ const SettingsModal = ({ isOpen, onClose, config, serverConfig, isEnvLoading, on
 const InventoryManager = ({ item, logs, isLoading, onUpdate }: any) => {
     const [mode, setMode] = useState<'VIEW' | 'IN' | 'OUT'>('VIEW');
     const [amount, setAmount] = useState<string>('');
-    const [reason, setReason] = useState<string>('');
-    const [note, setNote] = useState<string>('');
+    const [reason, setReason] = useState('PURCHASE');
+    const [note, setNote] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        const numAmount = parseFloat(amount);
-        if (!numAmount || numAmount <= 0) return alert('请输入有效数量');
+        const val = parseFloat(amount);
+        if (!val || val <= 0) return alert('请输入有效数量');
         
         setIsSubmitting(true);
-        // If mode is OUT, amount should be negative
-        const change = mode === 'OUT' ? -numAmount : numAmount;
-        // Default reasons if not selected
-        const finalReason = reason || (mode === 'IN' ? 'PURCHASE' : 'CONSUME');
+        const finalAmount = mode === 'OUT' ? -val : val;
         
-        const success = await onUpdate(change, finalReason, note);
+        let finalReason = reason;
+        // Fix default reasons if needed when switching modes
+        if (mode === 'IN' && (reason === 'CONSUME' || reason === 'DAMAGE' || reason === 'GIFT')) {
+             if (reason !== 'GIFT') finalReason = 'PURCHASE'; 
+        }
+
+        const success = await onUpdate(finalAmount, finalReason, note);
         if (success) {
             setMode('VIEW');
             setAmount('');
-            setReason('');
             setNote('');
+            setReason('PURCHASE');
         }
         setIsSubmitting(false);
     };
 
+    // Auto set default reason when mode changes
+    useEffect(() => {
+        if (mode === 'IN') setReason('PURCHASE');
+        if (mode === 'OUT') setReason('CONSUME');
+    }, [mode]);
+
     return (
         <div className="flex flex-col h-full">
-            {/* Action Bar */}
-            <div className="grid grid-cols-2 gap-3 mb-6">
-                <button 
-                    onClick={() => setMode(mode === 'IN' ? 'VIEW' : 'IN')}
-                    className={`p-3 rounded-lg border text-sm font-medium transition-all flex items-center justify-center gap-2 ${mode === 'IN' ? 'bg-green-50 border-green-200 text-green-700 ring-2 ring-green-500/20' : 'bg-white border-tea-200 text-tea-600 hover:bg-green-50/50'}`}
-                >
-                    <ArrowDownCircle size={18} className={mode === 'IN' ? 'text-green-600' : 'text-tea-300'}/>
-                    入库 (增加)
-                </button>
-                <button 
-                    onClick={() => setMode(mode === 'OUT' ? 'VIEW' : 'OUT')}
-                    className={`p-3 rounded-lg border text-sm font-medium transition-all flex items-center justify-center gap-2 ${mode === 'OUT' ? 'bg-orange-50 border-orange-200 text-orange-700 ring-2 ring-orange-500/20' : 'bg-white border-tea-200 text-tea-600 hover:bg-orange-50/50'}`}
-                >
-                    <ArrowUpCircle size={18} className={mode === 'OUT' ? 'text-orange-600' : 'text-tea-300'}/>
-                    出库 (减少)
-                </button>
+            {/* Top: Current Stock & Actions */}
+            <div className="bg-tea-50/50 p-4 rounded-xl border border-tea-100 mb-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div className="text-center sm:text-left">
+                     <div className="text-xs text-tea-500 uppercase font-bold tracking-wider mb-1">当前库存</div>
+                     <div className="text-3xl font-serif font-bold text-tea-900 flex items-baseline gap-1 justify-center sm:justify-start">
+                         {item.quantity} <span className="text-sm font-sans font-normal text-tea-500">{item.unit}</span>
+                     </div>
+                </div>
+                
+                {mode === 'VIEW' && (
+                    <div className="flex gap-2 w-full sm:w-auto">
+                        <Button className="flex-1 sm:flex-none" onClick={() => setMode('IN')}>
+                            <ArrowDownCircle size={18} /> 入库
+                        </Button>
+                        <Button className="flex-1 sm:flex-none" variant="secondary" onClick={() => setMode('OUT')}>
+                            <ArrowUpCircle size={18} /> 出库
+                        </Button>
+                    </div>
+                )}
             </div>
 
-            {/* Operation Form */}
+            {/* Middle: Action Form */}
             {mode !== 'VIEW' && (
-                <form onSubmit={handleSubmit} className="bg-tea-50/50 p-4 rounded-xl border border-tea-100 mb-6 animate-in slide-in-from-top-2">
-                    <div className="flex justify-between items-center mb-4">
-                        <h4 className="font-bold text-tea-800 text-sm">
-                            {mode === 'IN' ? '新增入库' : '消耗/出库'}
+                <div className="bg-white border border-tea-200 rounded-xl p-4 shadow-sm mb-6 animate-in slide-in-from-top-2">
+                    <div className="flex justify-between items-center mb-4 pb-2 border-b border-tea-50">
+                        <h4 className="font-bold text-tea-800 flex items-center gap-2">
+                            {mode === 'IN' ? <ArrowDownCircle className="text-green-600"/> : <ArrowUpCircle className="text-amber-600"/>}
+                            {mode === 'IN' ? '入库登记' : '出库登记'}
                         </h4>
-                        <button type="button" onClick={() => setMode('VIEW')}><X size={16} className="text-tea-400"/></button>
+                        <button onClick={() => setMode('VIEW')} className="text-tea-400 hover:text-tea-600"><X size={18}/></button>
                     </div>
-
-                    <div className="space-y-4">
-                         <div className="flex gap-4">
-                             <div className="w-1/2 space-y-1.5">
-                                 <label className="text-xs font-semibold text-tea-500 uppercase">数量 ({item.unit})</label>
-                                 <input 
-                                    type="number" step="0.01" min="0.01" required
-                                    className="w-full px-3 py-2 bg-white border border-tea-200 rounded-lg focus:ring-2 focus:ring-accent/50 focus:border-accent text-tea-800 font-mono"
-                                    value={amount} onChange={e => setAmount(e.target.value)}
-                                    placeholder="0.00"
-                                    autoFocus
-                                 />
-                             </div>
-                             <div className="w-1/2 space-y-1.5">
-                                 <label className="text-xs font-semibold text-tea-500 uppercase">原因</label>
-                                 <select 
-                                    className="w-full px-3 py-2 bg-white border border-tea-200 rounded-lg text-sm text-tea-800"
-                                    value={reason} onChange={e => setReason(e.target.value)}
-                                 >
+                    
+                    <form onSubmit={handleSubmit} className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                             <Input 
+                                label={`数量 (${item.unit})`} 
+                                type="number" 
+                                min="0.01" 
+                                step="0.01" 
+                                value={amount} 
+                                onChange={(e: any) => setAmount(e.target.value)} 
+                                required
+                                autoFocus
+                             />
+                             <div className="space-y-1.5">
+                                <label className="text-xs font-semibold text-tea-500 uppercase tracking-wider">类型</label>
+                                <select 
+                                    className="w-full px-3 py-2 bg-white border border-tea-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-accent/50 text-sm"
+                                    value={reason}
+                                    onChange={(e) => setReason(e.target.value)}
+                                >
                                     {mode === 'IN' ? (
                                         <>
                                             <option value="PURCHASE">新购入库</option>
                                             <option value="GIFT">获赠</option>
                                             <option value="ADJUST">盘盈调整</option>
-                                            <option value="OTHER">其他入库</option>
                                         </>
                                     ) : (
                                         <>
@@ -1509,61 +1549,56 @@ const InventoryManager = ({ item, logs, isLoading, onUpdate }: any) => {
                                             <option value="GIFT">赠友</option>
                                             <option value="DAMAGE">损耗/遗失</option>
                                             <option value="ADJUST">盘亏调整</option>
-                                            <option value="OTHER">其他出库</option>
                                         </>
                                     )}
-                                 </select>
+                                </select>
                              </div>
-                         </div>
-                         <Input 
-                            label="备注 (可选)" 
-                            placeholder={mode === 'IN' ? "来源、价格等..." : "品鉴感受、去向等..."}
-                            value={note} onChange={(e: any) => setNote(e.target.value)}
-                         />
-                         <Button type="submit" disabled={isSubmitting} className="w-full" variant={mode === 'IN' ? 'primary' : 'danger'}>
-                             {isSubmitting ? <Loader2 className="animate-spin" size={16}/> : <CheckCircle2 size={16}/>}
-                             确认{mode === 'IN' ? '入库' : '出库'}
-                         </Button>
-                    </div>
-                </form>
+                        </div>
+                        <Input label="备注" placeholder="选填，如：朋友送的、喝了一泡..." value={note} onChange={(e: any) => setNote(e.target.value)} />
+                        
+                        <div className="pt-2 flex justify-end">
+                            <Button type="submit" disabled={isSubmitting}>
+                                {isSubmitting ? <Loader2 className="animate-spin" size={18}/> : <CheckCircle2 size={18}/>}
+                                确认{mode === 'IN' ? '入库' : '出库'}
+                            </Button>
+                        </div>
+                    </form>
+                </div>
             )}
 
-            {/* History List */}
+            {/* Bottom: Logs List */}
             <div className="flex-1 overflow-hidden flex flex-col">
-                 <h4 className="font-bold text-tea-800 text-sm mb-3 flex items-center gap-2">
-                     <History size={14}/> 库存记录
-                 </h4>
-                 
-                 <div className="flex-1 overflow-y-auto pr-2 space-y-3">
-                     {isLoading ? (
-                         <div className="py-10 flex justify-center"><Loader2 className="animate-spin text-tea-300"/></div>
-                     ) : logs.length === 0 ? (
-                         <div className="text-center py-10 text-tea-400 text-sm">暂无记录</div>
-                     ) : (
-                         logs.map((log: InventoryLog) => (
-                             <div key={log.id} className="bg-white p-3 rounded-lg border border-tea-100 shadow-sm flex items-start gap-3">
-                                 <div className={`mt-1 w-2 h-2 rounded-full flex-shrink-0 ${log.change_amount > 0 ? 'bg-green-500' : (log.change_amount < 0 ? 'bg-orange-500' : 'bg-gray-400')}`} />
-                                 <div className="flex-1 min-w-0">
-                                     <div className="flex justify-between items-start">
-                                         <span className="font-medium text-tea-800 text-sm truncate">{formatReason(log.reason, log.change_amount)}</span>
-                                         <span className={`font-mono text-sm font-bold ${log.change_amount > 0 ? 'text-green-600' : 'text-orange-600'}`}>
-                                             {log.change_amount > 0 ? '+' : ''}{log.change_amount} {item.unit}
-                                         </span>
-                                     </div>
-                                     <div className="text-xs text-tea-400 mt-1 flex justify-between">
-                                         <span>{new Date(log.created_at).toLocaleString()}</span>
-                                         <span>结余: {log.current_balance}</span>
-                                     </div>
-                                     {log.note && (
-                                         <div className="mt-2 text-xs text-tea-600 bg-tea-50 p-2 rounded">
-                                             {log.note}
-                                         </div>
-                                     )}
-                                 </div>
-                             </div>
-                         ))
-                     )}
-                 </div>
+                <h4 className="text-xs font-bold text-tea-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                    <History size={14}/> 变更记录
+                </h4>
+                
+                <div className="flex-1 overflow-y-auto -mr-2 pr-2 space-y-3 custom-scrollbar">
+                    {isLoading ? (
+                        <div className="flex justify-center py-8"><Loader2 className="animate-spin text-tea-300"/></div>
+                    ) : logs.length === 0 ? (
+                        <div className="text-center py-8 text-tea-300 text-sm">暂无记录</div>
+                    ) : (
+                        logs.map((log: any) => (
+                            <div key={log.id} className="group relative pl-4 pb-4 border-l border-tea-100 last:border-0 last:pb-0">
+                                <div className={`absolute -left-1.5 top-1.5 w-3 h-3 rounded-full border-2 border-white ${log.change_amount > 0 ? 'bg-green-400' : log.change_amount < 0 ? 'bg-amber-400' : 'bg-gray-300'}`}></div>
+                                <div className="flex justify-between items-start">
+                                    <div>
+                                        <div className="text-sm font-bold text-tea-800">
+                                            {formatReason(log.reason, log.change_amount)}
+                                        </div>
+                                        {log.note && <div className="text-xs text-tea-500 mt-0.5">{log.note}</div>}
+                                        <div className="text-[10px] text-tea-300 mt-1">
+                                            {new Date(log.created_at).toLocaleString()}
+                                        </div>
+                                    </div>
+                                    <div className={`text-sm font-mono font-bold ${log.change_amount > 0 ? 'text-green-600' : 'text-amber-600'}`}>
+                                        {log.change_amount > 0 ? '+' : ''}{log.change_amount}
+                                    </div>
+                                </div>
+                            </div>
+                        ))
+                    )}
+                </div>
             </div>
         </div>
     );
