@@ -15,7 +15,8 @@ create table if not exists public.tea_items (
   image_url text,
   quantity numeric default 1,
   unit text default '件',
-  price numeric default 0,    -- 新增价格/估值字段
+  price numeric default 0,    -- 总价值
+  unit_price numeric default 0, -- 新增：单价 (用于自动计算)
   created_at bigint default (extract(epoch from now()) * 1000)::bigint
 );
 
@@ -23,11 +24,18 @@ create table if not exists public.tea_items (
 alter table public.tea_items add column if not exists quantity numeric default 1;
 alter table public.tea_items add column if not exists created_at bigint default (extract(epoch from now()) * 1000)::bigint;
 alter table public.tea_items add column if not exists unit text default '件';
-alter table public.tea_items add column if not exists price numeric default 0; -- 补丁：新增价格
+alter table public.tea_items add column if not exists price numeric default 0; 
+alter table public.tea_items add column if not exists unit_price numeric default 0; -- 补丁：新增单价
 
 -- 补丁: 升级数量字段为小数类型 (Numeric) 以支持克重或拆饼消耗
 alter table public.tea_items alter column quantity type numeric;
 alter table public.tea_items alter column price type numeric;
+alter table public.tea_items alter column unit_price type numeric;
+
+-- 数据清洗: 如果 unit_price 为 0 但有总价和数量，自动计算历史数据的单价
+update public.tea_items 
+set unit_price = price / nullif(quantity, 0) 
+where (unit_price is null or unit_price = 0) and price > 0 and quantity > 0;
 
 -- 2. 设置 tea_items 权限
 alter table public.tea_items enable row level security;
@@ -38,8 +46,8 @@ create policy "Public Access Tea Items" on public.tea_items for all using (true)
 create table if not exists public.inventory_logs (
   id uuid default gen_random_uuid() primary key,
   item_id uuid references public.tea_items(id) on delete cascade,
-  change_amount numeric not null, -- 修改为 numeric
-  current_balance numeric not null, -- 修改为 numeric
+  change_amount numeric not null,
+  current_balance numeric not null,
   reason text not null, 
   note text,
   created_at bigint default (extract(epoch from now()) * 1000)::bigint
