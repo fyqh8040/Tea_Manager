@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
@@ -197,14 +198,14 @@ const Badge = ({ children, color = 'tea', className = '' }: any) => {
 };
 
 const StatCard = ({ icon, label, value, subtext }: any) => (
-    <div className="bg-white/60 backdrop-blur-md border border-tea-100 rounded-xl px-4 py-3 flex items-center gap-3 shadow-sm min-w-[140px]">
-        <div className="w-10 h-10 rounded-full bg-tea-50 flex items-center justify-center text-accent shrink-0">
+    <div className="bg-white/60 backdrop-blur-md border border-tea-100 rounded-xl px-5 py-4 flex items-center gap-4 shadow-sm min-w-[180px] transition-transform hover:scale-105 duration-300">
+        <div className="w-12 h-12 rounded-full bg-tea-50 flex items-center justify-center text-accent shrink-0">
             {icon}
         </div>
         <div>
-            <div className="text-[10px] text-tea-500 font-bold uppercase tracking-wider">{label}</div>
-            <div className="text-lg font-bold text-tea-900 font-serif leading-tight">{value}</div>
-            {subtext && <div className="text-[10px] text-tea-400 scale-90 origin-left">{subtext}</div>}
+            <div className="text-xs text-tea-500 font-bold uppercase tracking-wider mb-0.5">{label}</div>
+            <div className="text-2xl font-bold text-tea-900 font-serif leading-tight">{value}</div>
+            {subtext && <div className="text-xs text-tea-400 mt-0.5">{subtext}</div>}
         </div>
     </div>
 );
@@ -656,15 +657,15 @@ const App = () => {
 
           {/* Right Side Stats */}
           {isConnected && !dbError && (
-             <div className="flex gap-3 overflow-x-auto pb-1 md:pb-0 no-scrollbar">
+             <div className="flex gap-4 overflow-x-auto pb-1 md:pb-0 no-scrollbar">
                   <StatCard 
-                      icon={<Package size={18} />} 
+                      icon={<Package size={24} />} 
                       label="藏品总数" 
                       value={stats.totalItems} 
                       subtext="件/套"
                   />
                   <StatCard 
-                      icon={<Coins size={18} />} 
+                      icon={<Coins size={24} />} 
                       label="资产总值" 
                       value={formatCurrency(stats.totalValue)} 
                       subtext="估算价值"
@@ -1350,255 +1351,247 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, onStockUpdate, con
   );
 };
 
-const SettingsModal = ({ isOpen, onClose, config, serverConfig, isEnvLoading, onSave }: any) => {
-  const [localConfig, setLocalConfig] = useState(config);
+const InventoryManager = ({ item, logs, isLoading, onUpdate }: any) => {
+  const [mode, setMode] = useState<'IN' | 'OUT'>('OUT');
+  const [amount, setAmount] = useState<number | ''>('');
+  const [reason, setReason] = useState('CONSUME');
+  const [note, setNote] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  useEffect(() => {
-    setLocalConfig(config);
-  }, [config]);
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!amount || Number(amount) <= 0) return alert('请输入有效数量');
+    
+    setIsSubmitting(true);
+    const finalAmount = mode === 'IN' ? Number(amount) : -Number(amount);
+    
+    // Auto-select reason if not changed by user for the mode
+    let finalReason = reason;
+    if (mode === 'IN' && reason === 'CONSUME') finalReason = 'PURCHASE'; 
+    if (mode === 'OUT' && reason === 'PURCHASE') finalReason = 'CONSUME';
 
-  const handleSave = () => {
-    onSave(localConfig);
-    onClose();
+    const success = await onUpdate(finalAmount, finalReason, note);
+    if (success) {
+      setAmount('');
+      setNote('');
+      // Reset defaults
+      if (mode === 'OUT') setReason('CONSUME');
+      else setReason('PURCHASE');
+    }
+    setIsSubmitting(false);
   };
 
-  if (!isOpen) return null;
+  const reasons = mode === 'IN' 
+    ? [{v: 'PURCHASE', l: '新购入库'}, {v: 'GIFT', l: '获赠'}, {v: 'ADJUST', l: '盘盈调整'}, {v: 'RETURN', l: '退货入库'}]
+    : [{v: 'CONSUME', l: '品饮/使用'}, {v: 'GIFT', l: '赠友'}, {v: 'DAMAGE', l: '损耗/遗失'}, {v: 'ADJUST', l: '盘亏调整'}];
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-stone-900/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="bg-white rounded-xl w-full max-w-lg p-6 relative shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-        <div className="flex justify-between items-center mb-6">
-           <h2 className="font-serif text-xl font-bold text-tea-900 flex items-center gap-2">
-              <Settings className="text-tea-400"/> 系统设置
-           </h2>
-           <button onClick={onClose}><X size={24} className="text-tea-400 hover:text-tea-600" /></button>
-        </div>
-
-        <div className="space-y-6 max-h-[70vh] overflow-y-auto pr-2">
-            
-            {/* Server Status Section */}
-            <div className={`p-4 rounded-lg border ${serverConfig?.hasServerDb ? 'bg-green-50 border-green-100' : 'bg-gray-50 border-gray-100'}`}>
-                <div className="flex items-center gap-3">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${serverConfig?.hasServerDb ? 'bg-green-200 text-green-700' : 'bg-gray-200 text-gray-500'}`}>
-                        <Server size={16}/>
-                    </div>
-                    <div>
-                        <h4 className="font-bold text-sm text-tea-900">服务端数据库 (Vercel Postgres)</h4>
-                        <div className="flex items-center gap-2 text-xs mt-0.5">
-                            {isEnvLoading ? (
-                                <span className="text-tea-400 flex items-center gap-1"><Loader2 size={10} className="animate-spin"/> 检测中...</span>
-                            ) : serverConfig?.hasServerDb ? (
-                                <span className="text-green-600 font-medium flex items-center gap-1"><CheckCircle2 size={12}/> 已连接</span>
-                            ) : (
-                                <span className="text-gray-500">未检测到环境变量配置</span>
-                            )}
+    <div className="flex flex-col h-full">
+       {/* Action Area */}
+       <div className="bg-tea-50/50 p-4 rounded-xl mb-6 border border-tea-100">
+           <div className="flex gap-2 mb-4 bg-white p-1 rounded-lg border border-tea-100 w-fit">
+               <button 
+                  type="button"
+                  onClick={() => { setMode('OUT'); setReason('CONSUME'); }}
+                  className={`px-4 py-1.5 rounded-md text-sm font-bold flex items-center gap-2 transition-all ${mode === 'OUT' ? 'bg-amber-100 text-amber-800 shadow-sm' : 'text-tea-400 hover:text-tea-600'}`}
+               >
+                   <ArrowDownCircle size={16}/> 出库 / 消耗
+               </button>
+               <button 
+                  type="button"
+                  onClick={() => { setMode('IN'); setReason('PURCHASE'); }}
+                  className={`px-4 py-1.5 rounded-md text-sm font-bold flex items-center gap-2 transition-all ${mode === 'IN' ? 'bg-green-100 text-green-800 shadow-sm' : 'text-tea-400 hover:text-tea-600'}`}
+               >
+                   <ArrowUpCircle size={16}/> 入库 / 补充
+               </button>
+           </div>
+           
+           <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+               <div className="flex gap-3">
+                   <div className="w-1/3">
+                        <Input 
+                            type="number" 
+                            min="0.01" 
+                            step="0.01"
+                            placeholder="数量" 
+                            value={amount} 
+                            onChange={(e: any) => setAmount(e.target.value)} 
+                            required
+                            rightLabel={item.unit}
+                        />
+                   </div>
+                   <div className="flex-1">
+                        <div className="space-y-1.5">
+                            <label className="text-xs font-semibold text-tea-500 uppercase tracking-wider">变动原因</label>
+                            <select 
+                                className="w-full px-3 py-2 bg-white border border-tea-200 rounded-lg text-sm h-[38px]"
+                                value={reason}
+                                onChange={(e) => setReason(e.target.value)}
+                            >
+                                {reasons.map(r => <option key={r.v} value={r.v}>{r.l}</option>)}
+                            </select>
                         </div>
-                    </div>
-                </div>
-            </div>
+                   </div>
+               </div>
+               <div className="flex gap-3 items-end">
+                   <div className="flex-1">
+                       <Input placeholder="备注 (可选)" value={note} onChange={(e: any) => setNote(e.target.value)} />
+                   </div>
+                   <Button type="submit" disabled={isSubmitting} variant={mode === 'IN' ? 'primary' : 'danger'}>
+                       {isSubmitting ? <Loader2 className="animate-spin"/> : '确认'}
+                   </Button>
+               </div>
+           </form>
+       </div>
 
-            {/* Supabase Config */}
-            <div className="space-y-3">
-                 <h3 className="text-sm font-bold text-tea-900 border-l-4 border-accent pl-2">Client-side Supabase (可选)</h3>
-                 <p className="text-xs text-tea-500">如果未配置服务端数据库，可直接在前端连接 Supabase。</p>
-                 <Input 
-                    label="Project URL" 
-                    value={localConfig.supabaseUrl} 
-                    onChange={(e: any) => setLocalConfig({...localConfig, supabaseUrl: e.target.value})} 
-                    placeholder="https://xxx.supabase.co"
-                    prefixicon={<Cloud size={14}/>}
-                 />
-                 <Input 
-                    label="Anon Key" 
-                    type="password"
-                    value={localConfig.supabaseKey} 
-                    onChange={(e: any) => setLocalConfig({...localConfig, supabaseKey: e.target.value})} 
-                    placeholder="eyJhbGciOiJIUzI1NiIsInR..."
-                    prefixicon={<Key size={14}/>}
-                 />
-            </div>
-
-            {/* Image API Config */}
-            <div className="space-y-3 pt-4 border-t border-tea-50">
-                 <h3 className="text-sm font-bold text-tea-900 border-l-4 border-accent pl-2">图片上传服务</h3>
-                 <Input 
-                    label="Upload API URL" 
-                    value={localConfig.imageApiUrl} 
-                    onChange={(e: any) => setLocalConfig({...localConfig, imageApiUrl: e.target.value})} 
-                    placeholder="https://api.example.com/upload"
-                 />
-                 <Input 
-                    label="Auth Token" 
-                    type="password"
-                    value={localConfig.imageApiToken} 
-                    onChange={(e: any) => setLocalConfig({...localConfig, imageApiToken: e.target.value})} 
-                    placeholder="Bearer token..."
-                 />
-            </div>
-        </div>
-
-        <div className="mt-6 pt-4 border-t border-tea-50 flex justify-end gap-3">
-             <Button variant="secondary" onClick={onClose}>取消</Button>
-             <Button onClick={handleSave}>保存配置</Button>
-        </div>
-      </div>
+       {/* History List */}
+       <div className="flex-1 overflow-hidden flex flex-col">
+           <h3 className="font-bold text-tea-800 mb-3 flex items-center gap-2 text-sm">
+               <History size={16}/> 变动记录
+           </h3>
+           
+           <div className="flex-1 overflow-y-auto pr-2 space-y-3">
+               {isLoading ? (
+                   <div className="py-10 text-center"><Loader2 className="animate-spin mx-auto text-tea-300"/></div>
+               ) : logs.length === 0 ? (
+                   <div className="py-10 text-center text-tea-400 text-sm">暂无记录</div>
+               ) : (
+                   logs.map((log: any) => (
+                       <div key={log.id} className="bg-white border border-tea-100 p-3 rounded-lg flex items-center justify-between shadow-sm">
+                           <div className="flex items-start gap-3">
+                               <div className={`mt-1 w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${log.change_amount > 0 ? 'bg-green-100 text-green-600' : 'bg-amber-100 text-amber-600'}`}>
+                                   {log.change_amount > 0 ? <Plus size={14}/> : <ArrowDownCircle size={14}/>}
+                               </div>
+                               <div>
+                                   <div className="font-bold text-tea-800 text-sm">
+                                       {formatReason(log.reason, log.change_amount)}
+                                       {log.note && <span className="ml-2 font-normal text-tea-500 text-xs">- {log.note}</span>}
+                                   </div>
+                                   <div className="text-xs text-tea-400 mt-0.5">
+                                       {new Date(log.created_at).toLocaleString()}
+                                   </div>
+                               </div>
+                           </div>
+                           <div className="text-right">
+                               <div className={`font-mono font-bold ${log.change_amount > 0 ? 'text-green-600' : 'text-amber-700'}`}>
+                                   {log.change_amount > 0 ? '+' : ''}{log.change_amount} {item.unit}
+                               </div>
+                               <div className="text-xs text-tea-400">
+                                   结余: {log.current_balance}
+                               </div>
+                           </div>
+                       </div>
+                   ))
+               )}
+           </div>
+       </div>
     </div>
   );
 };
 
-const InventoryManager = ({ item, logs, isLoading, onUpdate }: any) => {
-    const [mode, setMode] = useState<'VIEW' | 'IN' | 'OUT'>('VIEW');
-    const [amount, setAmount] = useState<string>('');
-    const [reason, setReason] = useState('PURCHASE');
-    const [note, setNote] = useState('');
-    const [isSubmitting, setIsSubmitting] = useState(false);
+const SettingsModal = ({ isOpen, onClose, config, serverConfig, isEnvLoading, onSave }: any) => {
+    const [localConfig, setLocalConfig] = useState(config);
 
-    const handleSubmit = async (e: React.FormEvent) => {
+    useEffect(() => {
+        setLocalConfig(config);
+    }, [config]);
+
+    const handleSave = (e: React.FormEvent) => {
         e.preventDefault();
-        const val = parseFloat(amount);
-        if (!val || val <= 0) return alert('请输入有效数量');
-        
-        setIsSubmitting(true);
-        const finalAmount = mode === 'OUT' ? -val : val;
-        
-        let finalReason = reason;
-        // Fix default reasons if needed when switching modes
-        if (mode === 'IN' && (reason === 'CONSUME' || reason === 'DAMAGE' || reason === 'GIFT')) {
-             if (reason !== 'GIFT') finalReason = 'PURCHASE'; 
-        }
-
-        const success = await onUpdate(finalAmount, finalReason, note);
-        if (success) {
-            setMode('VIEW');
-            setAmount('');
-            setNote('');
-            setReason('PURCHASE');
-        }
-        setIsSubmitting(false);
+        onSave(localConfig);
+        onClose();
     };
 
-    // Auto set default reason when mode changes
-    useEffect(() => {
-        if (mode === 'IN') setReason('PURCHASE');
-        if (mode === 'OUT') setReason('CONSUME');
-    }, [mode]);
+    if (!isOpen) return null;
+
+    const isServerManaged = (key: string) => {
+        return serverConfig && serverConfig[key] && serverConfig[key].length > 0;
+    };
 
     return (
-        <div className="flex flex-col h-full">
-            {/* Top: Current Stock & Actions */}
-            <div className="bg-tea-50/50 p-4 rounded-xl border border-tea-100 mb-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-                <div className="text-center sm:text-left">
-                     <div className="text-xs text-tea-500 uppercase font-bold tracking-wider mb-1">当前库存</div>
-                     <div className="text-3xl font-serif font-bold text-tea-900 flex items-baseline gap-1 justify-center sm:justify-start">
-                         {item.quantity} <span className="text-sm font-sans font-normal text-tea-500">{item.unit}</span>
-                     </div>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-stone-900/40 backdrop-blur-sm" onClick={onClose} />
+            <div className="bg-white rounded-xl w-full max-w-lg p-6 relative shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+                <div className="flex justify-between items-center mb-6">
+                    <h2 className="font-serif text-xl font-bold text-tea-900 flex items-center gap-2">
+                        <Settings className="text-tea-400"/> 系统设置
+                    </h2>
+                    <button onClick={onClose}><X size={20} className="text-tea-400"/></button>
                 </div>
-                
-                {mode === 'VIEW' && (
-                    <div className="flex gap-2 w-full sm:w-auto">
-                        <Button className="flex-1 sm:flex-none" onClick={() => setMode('IN')}>
-                            <ArrowDownCircle size={18} /> 入库
-                        </Button>
-                        <Button className="flex-1 sm:flex-none" variant="secondary" onClick={() => setMode('OUT')}>
-                            <ArrowUpCircle size={18} /> 出库
-                        </Button>
-                    </div>
-                )}
-            </div>
 
-            {/* Middle: Action Form */}
-            {mode !== 'VIEW' && (
-                <div className="bg-white border border-tea-200 rounded-xl p-4 shadow-sm mb-6 animate-in slide-in-from-top-2">
-                    <div className="flex justify-between items-center mb-4 pb-2 border-b border-tea-50">
-                        <h4 className="font-bold text-tea-800 flex items-center gap-2">
-                            {mode === 'IN' ? <ArrowDownCircle className="text-green-600"/> : <ArrowUpCircle className="text-amber-600"/>}
-                            {mode === 'IN' ? '入库登记' : '出库登记'}
-                        </h4>
-                        <button onClick={() => setMode('VIEW')} className="text-tea-400 hover:text-tea-600"><X size={18}/></button>
-                    </div>
-                    
-                    <form onSubmit={handleSubmit} className="space-y-4">
-                        <div className="grid grid-cols-2 gap-4">
-                             <Input 
-                                label={`数量 (${item.unit})`} 
-                                type="number" 
-                                min="0.01" 
-                                step="0.01" 
-                                value={amount} 
-                                onChange={(e: any) => setAmount(e.target.value)} 
-                                required
-                                autoFocus
-                             />
-                             <div className="space-y-1.5">
-                                <label className="text-xs font-semibold text-tea-500 uppercase tracking-wider">类型</label>
-                                <select 
-                                    className="w-full px-3 py-2 bg-white border border-tea-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-accent/50 text-sm"
-                                    value={reason}
-                                    onChange={(e) => setReason(e.target.value)}
-                                >
-                                    {mode === 'IN' ? (
-                                        <>
-                                            <option value="PURCHASE">新购入库</option>
-                                            <option value="GIFT">获赠</option>
-                                            <option value="ADJUST">盘盈调整</option>
-                                        </>
-                                    ) : (
-                                        <>
-                                            <option value="CONSUME">品饮/使用</option>
-                                            <option value="GIFT">赠友</option>
-                                            <option value="DAMAGE">损耗/遗失</option>
-                                            <option value="ADJUST">盘亏调整</option>
-                                        </>
-                                    )}
-                                </select>
+                <form onSubmit={handleSave} className="space-y-6">
+                    {/* Database Config */}
+                    <div className="space-y-4">
+                         <div className="flex items-center gap-2 pb-2 border-b border-tea-100">
+                             <Database size={16} className="text-accent"/>
+                             <h3 className="font-bold text-tea-800 text-sm">数据连接</h3>
+                         </div>
+                         
+                         {config.hasServerDb ? (
+                             <div className="bg-blue-50 text-blue-700 p-3 rounded-lg text-sm flex items-start gap-2">
+                                 <Server size={16} className="mt-0.5 shrink-0"/>
+                                 <div>
+                                     <div className="font-bold">已连接服务端数据库</div>
+                                     <div className="text-xs opacity-80 mt-1">系统已通过环境变量自动连接到 Postgres 数据库。无需手动配置 Supabase。</div>
+                                 </div>
                              </div>
-                        </div>
-                        <Input label="备注" placeholder="选填，如：朋友送的、喝了一泡..." value={note} onChange={(e: any) => setNote(e.target.value)} />
-                        
-                        <div className="pt-2 flex justify-end">
-                            <Button type="submit" disabled={isSubmitting}>
-                                {isSubmitting ? <Loader2 className="animate-spin" size={18}/> : <CheckCircle2 size={18}/>}
-                                确认{mode === 'IN' ? '入库' : '出库'}
-                            </Button>
-                        </div>
-                    </form>
-                </div>
-            )}
-
-            {/* Bottom: Logs List */}
-            <div className="flex-1 overflow-hidden flex flex-col">
-                <h4 className="text-xs font-bold text-tea-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-                    <History size={14}/> 变更记录
-                </h4>
-                
-                <div className="flex-1 overflow-y-auto -mr-2 pr-2 space-y-3 custom-scrollbar">
-                    {isLoading ? (
-                        <div className="flex justify-center py-8"><Loader2 className="animate-spin text-tea-300"/></div>
-                    ) : logs.length === 0 ? (
-                        <div className="text-center py-8 text-tea-300 text-sm">暂无记录</div>
-                    ) : (
-                        logs.map((log: any) => (
-                            <div key={log.id} className="group relative pl-4 pb-4 border-l border-tea-100 last:border-0 last:pb-0">
-                                <div className={`absolute -left-1.5 top-1.5 w-3 h-3 rounded-full border-2 border-white ${log.change_amount > 0 ? 'bg-green-400' : log.change_amount < 0 ? 'bg-amber-400' : 'bg-gray-300'}`}></div>
-                                <div className="flex justify-between items-start">
-                                    <div>
-                                        <div className="text-sm font-bold text-tea-800">
-                                            {formatReason(log.reason, log.change_amount)}
-                                        </div>
-                                        {log.note && <div className="text-xs text-tea-500 mt-0.5">{log.note}</div>}
-                                        <div className="text-[10px] text-tea-300 mt-1">
-                                            {new Date(log.created_at).toLocaleString()}
-                                        </div>
-                                    </div>
-                                    <div className={`text-sm font-mono font-bold ${log.change_amount > 0 ? 'text-green-600' : 'text-amber-600'}`}>
-                                        {log.change_amount > 0 ? '+' : ''}{log.change_amount}
-                                    </div>
+                         ) : (
+                             <>
+                                <div className="space-y-2">
+                                    <Input 
+                                        label="Supabase URL" 
+                                        value={localConfig.supabaseUrl} 
+                                        onChange={(e: any) => setLocalConfig({...localConfig, supabaseUrl: e.target.value})}
+                                        placeholder="https://xyz.supabase.co"
+                                        disabled={isServerManaged('supabaseUrl')}
+                                    />
+                                    {isServerManaged('supabaseUrl') && <p className="text-xs text-green-600 flex items-center gap-1"><CheckCircle2 size={10}/> 由环境变量管理</p>}
                                 </div>
-                            </div>
-                        ))
-                    )}
-                </div>
+                                <div className="space-y-2">
+                                    <Input 
+                                        label="Supabase Anon Key" 
+                                        value={localConfig.supabaseKey} 
+                                        onChange={(e: any) => setLocalConfig({...localConfig, supabaseKey: e.target.value})}
+                                        type="password"
+                                        placeholder="eyJh..."
+                                        disabled={isServerManaged('supabaseKey')}
+                                    />
+                                </div>
+                             </>
+                         )}
+                    </div>
+
+                    {/* Image API Config */}
+                    <div className="space-y-4">
+                         <div className="flex items-center gap-2 pb-2 border-b border-tea-100">
+                             <ImageIcon size={16} className="text-accent"/>
+                             <h3 className="font-bold text-tea-800 text-sm">图床配置 (可选)</h3>
+                         </div>
+                         <div className="space-y-2">
+                             <Input 
+                                label="Upload API URL" 
+                                value={localConfig.imageApiUrl} 
+                                onChange={(e: any) => setLocalConfig({...localConfig, imageApiUrl: e.target.value})}
+                                placeholder="https://api.example.com/upload"
+                                disabled={isServerManaged('imageApiUrl')}
+                             />
+                         </div>
+                         <div className="space-y-2">
+                             <Input 
+                                label="API Token" 
+                                value={localConfig.imageApiToken} 
+                                onChange={(e: any) => setLocalConfig({...localConfig, imageApiToken: e.target.value})}
+                                type="password"
+                                disabled={isServerManaged('imageApiToken')}
+                             />
+                         </div>
+                    </div>
+
+                    <div className="pt-4 border-t border-tea-50 flex justify-end gap-3">
+                        <Button variant="secondary" onClick={onClose}>取消</Button>
+                        <Button type="submit">保存配置</Button>
+                    </div>
+                </form>
             </div>
         </div>
     );
