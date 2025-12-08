@@ -40,7 +40,10 @@ import {
   ChevronDown,
   ChevronUp,
   Cloud,
-  Scale
+  Scale,
+  Coins,
+  Banknote,
+  TrendingUp
 } from 'lucide-react';
 
 // --- Types ---
@@ -58,6 +61,7 @@ interface TeaItem {
   image_url?: string;
   quantity: number; 
   unit: string; // Added unit
+  price?: number; // Added price (Total value/cost)
   created_at: number;
 }
 
@@ -94,6 +98,10 @@ const formatReason = (reason: string, changeAmount: number = 0) => {
     case 'INITIAL': return '初始入库';
     default: return reason;
   }
+};
+
+const formatCurrency = (amount: number = 0) => {
+  return new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', maximumFractionDigits: 0 }).format(amount);
 };
 
 // --- Components ---
@@ -133,10 +141,17 @@ const Input = ({ label, ...props }: any) => (
       {label}
       {props.rightLabel}
     </label>
-    <input 
-      className="w-full px-3 py-2 bg-white/50 border border-tea-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent transition-all text-tea-800 placeholder-tea-300 disabled:opacity-50 disabled:bg-tea-100/50"
-      {...props}
-    />
+    <div className="relative">
+      <input 
+        className={`w-full px-3 py-2 bg-white/50 border border-tea-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent transition-all text-tea-800 placeholder-tea-300 disabled:opacity-50 disabled:bg-tea-100/50 ${props.prefixicon ? 'pl-9' : ''}`}
+        {...props}
+      />
+      {props.prefixicon && (
+        <div className="absolute left-3 top-1/2 -translate-y-1/2 text-tea-400 pointer-events-none">
+          {props.prefixicon}
+        </div>
+      )}
+    </div>
   </div>
 );
 
@@ -157,7 +172,8 @@ const Badge = ({ children, color = 'tea' }: any) => {
     clay: "bg-orange-100 text-orange-800",
     red: "bg-red-100 text-red-700",
     green: "bg-green-100 text-green-700",
-    blue: "bg-blue-100 text-blue-700"
+    blue: "bg-blue-100 text-blue-700",
+    gold: "bg-yellow-50 text-yellow-700 border border-yellow-200"
   };
   return (
     <span className={`px-2 py-0.5 rounded text-xs font-medium ${colors[color as keyof typeof colors]}`}>
@@ -165,6 +181,19 @@ const Badge = ({ children, color = 'tea' }: any) => {
     </span>
   );
 };
+
+const StatCard = ({ icon, label, value, subtext }: any) => (
+    <div className="bg-white/60 backdrop-blur-md border border-tea-100 rounded-xl p-4 flex items-center gap-4 shadow-sm">
+        <div className="w-10 h-10 rounded-full bg-accent/10 flex items-center justify-center text-accent">
+            {icon}
+        </div>
+        <div>
+            <div className="text-xs text-tea-500 font-medium uppercase tracking-wider">{label}</div>
+            <div className="text-lg font-bold text-tea-900 font-serif">{value}</div>
+            {subtext && <div className="text-xs text-tea-400">{subtext}</div>}
+        </div>
+    </div>
+);
 
 // --- Main Application ---
 
@@ -273,6 +302,13 @@ const App = () => {
     return '晚上好';
   }, []);
 
+  // Stats
+  const stats = useMemo(() => {
+    const totalItems = items.length;
+    const totalValue = items.reduce((sum, item) => sum + (item.price || 0), 0);
+    return { totalItems, totalValue };
+  }, [items]);
+
   // Persist config changes
   useEffect(() => {
     localStorage.setItem('tea_app_config', JSON.stringify(config));
@@ -318,7 +354,8 @@ const App = () => {
           const parsedItems = data.map(item => ({
             ...item,
             quantity: Number(item.quantity), // Ensure quantity is a number
-            created_at: Number(item.created_at) // Ensure created_at is a number (FIX: Fix 'Invalid Date' issue)
+            price: Number(item.price || 0),  // Ensure price is a number
+            created_at: Number(item.created_at) // Ensure created_at is a number
           }));
           setItems(parsedItems);
       }
@@ -392,6 +429,7 @@ const App = () => {
       image_url: item.image_url,
       quantity: Number(item.quantity ?? 1), // Ensure number
       unit: item.unit || '件',
+      price: Number(item.price || 0), // Save price
       ...(item.id ? {} : { created_at: Date.now() }) 
     };
 
@@ -449,7 +487,12 @@ const App = () => {
 
         if (savedData) {
             // Parse savedData numeric fields
-            const parsedSavedData = { ...savedData, quantity: Number(savedData.quantity) };
+            const parsedSavedData = { 
+                ...savedData, 
+                quantity: Number(savedData.quantity),
+                price: Number(savedData.price || 0),
+                created_at: Number(savedData.created_at)
+            };
             
             setItems(prev => {
                 const exists = prev.find(i => i.id === parsedSavedData!.id);
@@ -520,7 +563,12 @@ const App = () => {
 
       if (updatedItem) {
         // IMPORTANT: Parse updatedItem numeric fields
-        const parsedUpdatedItem = { ...updatedItem, quantity: Number(updatedItem.quantity) };
+        const parsedUpdatedItem = { 
+            ...updatedItem, 
+            quantity: Number(updatedItem.quantity),
+            price: Number(updatedItem.price || 0),
+            created_at: Number(updatedItem.created_at)
+        };
         setItems(prev => prev.map(i => i.id === id ? parsedUpdatedItem! : i));
         setEditingItem(parsedUpdatedItem);
         return true;
@@ -565,19 +613,35 @@ const App = () => {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 pt-24">
         
-        {/* Header */}
+        {/* Header with Stats */}
         <header className="mb-8">
           <h1 className="font-serif text-3xl md:text-4xl text-tea-900 mb-4">
             {greeting}，藏家
           </h1>
-          <p className="text-tea-500 max-w-xl leading-relaxed">
-            {!isConnected
-              ? "系统未连接到云端。请点击右上角设置图标，配置数据库连接。" 
-              : dbError === 'TABLE_MISSING' 
-                ? <span className="text-red-500 flex items-center gap-2 font-medium bg-red-50 px-2 py-0.5 rounded-md inline-block mt-1"><AlertTriangle size={16}/> 数据库尚未初始化</span>
-                : `目前云端共收录 ${items.length} 件藏品。每一片叶子都有它的故事。`
-            }
-          </p>
+          
+          {!isConnected || dbError === 'TABLE_MISSING' ? (
+              <p className="text-tea-500 max-w-xl leading-relaxed">
+                {!isConnected
+                  ? "系统未连接到云端。请点击右上角设置图标，配置数据库连接。" 
+                  : <span className="text-red-500 flex items-center gap-2 font-medium bg-red-50 px-2 py-0.5 rounded-md inline-block mt-1"><AlertTriangle size={16}/> 数据库尚未初始化</span>
+                }
+              </p>
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mt-6 max-w-2xl">
+                <StatCard 
+                    icon={<Package size={20} />} 
+                    label="藏品总数" 
+                    value={stats.totalItems} 
+                    subtext="件/套"
+                />
+                <StatCard 
+                    icon={<Coins size={20} />} 
+                    label="资产总值" 
+                    value={formatCurrency(stats.totalValue)} 
+                    subtext="估算价值"
+                />
+            </div>
+          )}
         </header>
 
         {/* Filters */}
@@ -665,15 +729,22 @@ const App = () => {
                    <Badge color="tea">
                       {item.quantity} {item.unit || '件'}
                    </Badge>
-                  <Badge color={item.type === 'TEA' ? 'accent' : 'clay'}>
-                    {item.type === 'TEA' ? '茶' : '器'}
-                  </Badge>
+                   {item.price && item.price > 0 && (
+                      <Badge color="gold">
+                         ¥{item.price}
+                      </Badge>
+                   )}
                 </div>
               </div>
               
               <div className="p-4 flex flex-col flex-1">
                 <div className="flex justify-between items-start mb-2">
                   <h3 className="font-serif text-lg font-bold text-tea-900 line-clamp-1">{item.name}</h3>
+                   <div className="flex-shrink-0">
+                      <Badge color={item.type === 'TEA' ? 'accent' : 'clay'}>
+                        {item.type === 'TEA' ? '茶' : '器'}
+                      </Badge>
+                   </div>
                 </div>
                 
                 <div className="flex items-center gap-2 text-xs text-tea-500 mb-3">
@@ -883,7 +954,8 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, onStockUpdate, con
     description: '',
     image_url: '',
     quantity: 1,
-    unit: '克 (g)' // Default for tea
+    unit: '克 (g)', // Default for tea
+    price: 0
   });
   
   const [isUploading, setIsUploading] = useState(false);
@@ -908,7 +980,8 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, onStockUpdate, con
         description: '',
         image_url: '',
         quantity: 1,
-        unit: '克 (g)'
+        unit: '克 (g)',
+        price: 0
       });
       setActiveTab('DETAILS');
       setLogs([]);
@@ -1115,9 +1188,21 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, onStockUpdate, con
                                     <Input label="分类" value={formData.category} onChange={(e: any) => setFormData({...formData, category: e.target.value})} required placeholder={formData.type === 'TEA' ? '如：普洱、红茶' : '如：紫砂壶、盖碗'}/>
                                     <Input label="年份" value={formData.year} onChange={(e: any) => setFormData({...formData, year: e.target.value})} />
                                 </div>
+
                                 <div className="grid grid-cols-2 gap-4">
                                      <Input label="产地 / 来源" value={formData.origin} onChange={(e: any) => setFormData({...formData, origin: e.target.value})} />
-                                     
+                                     <Input 
+                                        label="购入价格 / 估值" 
+                                        type="number"
+                                        min="0"
+                                        value={formData.price} 
+                                        onChange={(e: any) => setFormData({...formData, price: parseFloat(e.target.value) || 0})}
+                                        prefixicon="¥"
+                                        placeholder="0"
+                                     />
+                                </div>
+                                
+                                <div className="grid grid-cols-1 gap-4">
                                      {/* Inventory Input Group */}
                                      {/* Only show initial quantity input if creating new */}
                                      {!item && (

@@ -55,8 +55,8 @@ export default async function handler(req, res) {
       // 2. Create / Update
       if (op === 'create' || op === 'update') {
         const itemData = body.data;
-        // 定义通用字段 (新增 unit)
-        const commonFields = ['name', 'type', 'category', 'year', 'origin', 'description', 'image_url', 'quantity', 'unit'];
+        // 定义通用字段 (新增 price)
+        const commonFields = ['name', 'type', 'category', 'year', 'origin', 'description', 'image_url', 'quantity', 'unit', 'price'];
         
         if (op === 'update') {
           // Update: 仅更新通用字段

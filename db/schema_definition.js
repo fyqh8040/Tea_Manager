@@ -13,8 +13,9 @@ create table if not exists public.tea_items (
   origin text,
   description text,
   image_url text,
-  quantity numeric default 1, -- 修改为 numeric 支持小数
-  unit text default '件',     -- 新增单位字段
+  quantity numeric default 1,
+  unit text default '件',
+  price numeric default 0,    -- 新增价格/估值字段
   created_at bigint default (extract(epoch from now()) * 1000)::bigint
 );
 
@@ -22,9 +23,11 @@ create table if not exists public.tea_items (
 alter table public.tea_items add column if not exists quantity numeric default 1;
 alter table public.tea_items add column if not exists created_at bigint default (extract(epoch from now()) * 1000)::bigint;
 alter table public.tea_items add column if not exists unit text default '件';
+alter table public.tea_items add column if not exists price numeric default 0; -- 补丁：新增价格
 
 -- 补丁: 升级数量字段为小数类型 (Numeric) 以支持克重或拆饼消耗
 alter table public.tea_items alter column quantity type numeric;
+alter table public.tea_items alter column price type numeric;
 
 -- 2. 设置 tea_items 权限
 alter table public.tea_items enable row level security;
