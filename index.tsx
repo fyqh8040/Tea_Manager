@@ -50,7 +50,8 @@ import {
   Users,
   Shield,
   Lock,
-  Edit2
+  Edit2,
+  Coffee
 } from 'lucide-react';
 
 // --- Types ---
@@ -103,6 +104,17 @@ interface UserProfile {
 
 const TEA_UNITS = ['克 (g)', '千克 (kg)', '饼', '砖', '沱', '盒', '罐', '袋', '泡'];
 const TEAWARE_UNITS = ['件', '套', '个', '把', '只', '组'];
+
+const SUGGESTIONS = {
+  TEA: {
+    category: ['普洱 (生)', '普洱 (熟)', '绿茶', '红茶', '岩茶', '乌龙', '白茶', '黑茶', '黄茶', '花茶', '单丛'],
+    origin: ['云南', '福建', '浙江', '安徽', '四川', '台湾', '广东', '江苏']
+  },
+  TEAWARE: {
+    category: ['紫砂壶', '盖碗', '品茗杯', '公道杯', '茶宠', '建盏', '柴烧', '茶叶罐', '茶盘', '茶荷', '煮茶器'],
+    origin: ['宜兴', '景德镇', '德化', '龙泉', '建阳', '潮州']
+  }
+};
 
 const TEA_QUOTES = [
     "茶亦醉人何必酒，书能香我无须花。",
@@ -196,6 +208,84 @@ const Input = ({ label, ...props }: any) => (
     </div>
   </div>
 );
+
+// Smart Input with suggestions
+const Combobox = ({ label, value, onChange, options = [], placeholder, ...props }: any) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const [isFocused, setIsFocused] = useState(false);
+    const wrapperRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
+                setIsOpen(false);
+            }
+        };
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, []);
+
+    const filteredOptions = options.filter((opt: string) => 
+        !value || opt.toLowerCase().includes(value.toLowerCase())
+    );
+
+    return (
+        <div className="space-y-1.5" ref={wrapperRef}>
+            <label className="text-xs font-semibold text-tea-500 uppercase tracking-wider flex justify-between">
+                {label}
+                {props.rightLabel}
+            </label>
+            <div className="relative">
+                <input
+                    className={`w-full px-3 py-2 bg-white/50 border border-tea-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent transition-all text-tea-800 placeholder-tea-300 ${props.prefixicon ? 'pl-9' : ''}`}
+                    value={value}
+                    onChange={(e) => { onChange(e); setIsOpen(true); }}
+                    onFocus={() => { setIsFocused(true); setIsOpen(true); }}
+                    placeholder={placeholder}
+                    {...props}
+                />
+                {props.prefixicon && (
+                    <div className="absolute left-3 top-1/2 -translate-y-1/2 text-tea-400 pointer-events-none">
+                        {props.prefixicon}
+                    </div>
+                )}
+                <div 
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-tea-400 cursor-pointer hover:text-accent"
+                    onClick={() => setIsOpen(!isOpen)}
+                >
+                    <ChevronDown size={14} className={`transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+                </div>
+
+                {/* Dropdown */}
+                {isOpen && (isFocused || value) && (
+                    <div className="absolute z-50 w-full mt-1 bg-white border border-tea-100 rounded-lg shadow-lg max-h-48 overflow-y-auto animate-in fade-in zoom-in-95 duration-100">
+                        {filteredOptions.length > 0 ? (
+                            <div className="p-1 grid grid-cols-2 gap-1">
+                                {filteredOptions.map((opt: string) => (
+                                    <button
+                                        key={opt}
+                                        type="button"
+                                        className="text-left px-3 py-1.5 text-sm text-tea-700 hover:bg-tea-50 hover:text-accent rounded-md transition-colors truncate"
+                                        onClick={() => {
+                                            onChange({ target: { value: opt } });
+                                            setIsOpen(false);
+                                        }}
+                                    >
+                                        {opt}
+                                    </button>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="px-3 py-2 text-xs text-tea-400 text-center">
+                                可直接输入 "{value}"
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
 
 const TextArea = ({ label, ...props }: any) => (
   <div className="space-y-1.5">
@@ -819,8 +909,9 @@ const App = () => {
   );
 };
 
-// --- Login Screen ---
+// ... (LoginScreen, ChangePasswordModal, UserManagement, SettingsModal, DbInitModal remain unchanged)
 const LoginScreen = ({ onLogin }: any) => {
+    // ... (LoginScreen code remains the same as before)
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
@@ -841,7 +932,6 @@ const LoginScreen = ({ onLogin }: any) => {
             if(res.ok) {
                 onLogin(data.user, data.token);
             } else {
-                // If the error message indicates a DB issue, show the fix button
                 const msg = data.error || '登录失败';
                 setError(msg);
             }
@@ -854,7 +944,6 @@ const LoginScreen = ({ onLogin }: any) => {
 
     return (
         <div className="min-h-screen flex items-center justify-center bg-[#f7f7f5] p-4 relative overflow-hidden">
-            {/* Background Decorations */}
             <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-accent/5 rounded-full blur-3xl pointer-events-none"></div>
             <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-tea-200/20 rounded-full blur-3xl pointer-events-none"></div>
 
@@ -932,9 +1021,8 @@ const LoginScreen = ({ onLogin }: any) => {
     );
 };
 
-// ... (ChangePasswordModal remain same)
+// ... (ChangePasswordModal code)
 const ChangePasswordModal = ({ isOpen, onClose, forced }: any) => {
-    // (Same as before)
     const [pass, setPass] = useState('');
     const [loading, setLoading] = useState(false);
 
@@ -980,7 +1068,7 @@ const ChangePasswordModal = ({ isOpen, onClose, forced }: any) => {
     );
 };
 
-// --- User Management Panel (Inside Settings) ---
+// ... (UserManagement code)
 const UserManagement = ({ onDbError }: any) => {
     const [users, setUsers] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
@@ -1123,8 +1211,7 @@ const UserManagement = ({ onDbError }: any) => {
     );
 };
 
-// ... (ItemModal, DbInitModal, InventoryManager remain same)
-
+// ... (SettingsModal code)
 const SettingsModal = ({ isOpen, onClose, config, serverConfig, isEnvLoading, onSave, user, setUser, onLogout, onChangePassword, onDbError }: any) => {
     const [localConfig, setLocalConfig] = useState(config);
     const [tab, setTab] = useState<'SYSTEM' | 'USERS'>('SYSTEM');
@@ -1244,6 +1331,7 @@ const SettingsModal = ({ isOpen, onClose, config, serverConfig, isEnvLoading, on
     );
 };
 
+// ... (DbInitModal code)
 const DbInitModal = ({ isOpen, onClose }: any) => {
     const [migrateStatus, setMigrateStatus] = useState<'IDLE' | 'SUCCESS' | 'ERROR'>('IDLE');
     const [errorMessage, setErrorMessage] = useState('');
@@ -1291,6 +1379,7 @@ const DbInitModal = ({ isOpen, onClose }: any) => {
     );
 };
 
+// Updated ItemModal with Type Toggle and Combobox
 const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, onStockUpdate, config, supabase }: any) => {
     const [activeTab, setActiveTab] = useState<'DETAILS' | 'HISTORY'>('DETAILS');
     const [formData, setFormData] = useState<Partial<TeaItem>>({ type: 'TEA', name: '', category: '', year: '', origin: '', description: '', image_url: '', quantity: 1, unit: '克 (g)', price: 0, unit_price: 0 });
@@ -1344,12 +1433,15 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, onStockUpdate, con
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/40 backdrop-blur-sm">
              <div className="bg-[#fcfcfb] rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col md:flex-row shadow-2xl">
-                 <div className="hidden md:block w-5/12 bg-tea-100 relative">
-                     {formData.image_url ? <img src={formData.image_url} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-tea-400"><Camera size={48}/></div>}
-                     <div className="absolute bottom-4 right-4">
-                        <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
-                        <Button size="sm" variant="secondary" onClick={()=>fileInputRef.current?.click()}>上传</Button>
+                 <div className="hidden md:block w-5/12 bg-tea-100 relative group">
+                     {formData.image_url ? 
+                        <img src={formData.image_url} className="w-full h-full object-cover"/> : 
+                        <div className="w-full h-full flex items-center justify-center text-tea-300 bg-tea-50/50"><Camera size={48}/></div>
+                     }
+                     <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        <Button size="sm" variant="secondary" onClick={()=>fileInputRef.current?.click()} className="shadow-lg"><Upload size={16}/> 更换图片</Button>
                      </div>
+                     <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
                  </div>
                  <div className="flex-1 flex flex-col h-full overflow-hidden">
                      {item && (
@@ -1360,33 +1452,77 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, onStockUpdate, con
                      )}
                      <div className="flex-1 overflow-y-auto p-6">
                          {activeTab==='DETAILS' || !item ? (
-                             <form onSubmit={(e)=>{e.preventDefault(); onSave(formData);}} className="space-y-4">
-                                 <Input label="名称" value={formData.name} onChange={(e:any)=>setFormData({...formData, name:e.target.value})} required/>
-                                 <div className="grid grid-cols-2 gap-4">
-                                     <Input label="分类" value={formData.category} onChange={(e:any)=>setFormData({...formData, category:e.target.value})}/>
-                                     <Input label="年份" value={formData.year} onChange={(e:any)=>setFormData({...formData, year:e.target.value})}/>
+                             <form onSubmit={(e)=>{e.preventDefault(); onSave(formData);}} className="space-y-5">
+                                 {/* Type Toggle */}
+                                 <div className="flex bg-tea-100 p-1 rounded-lg">
+                                    <button
+                                        type="button"
+                                        onClick={() => setFormData({...formData, type: 'TEA'})}
+                                        className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-all flex items-center justify-center gap-2 ${formData.type === 'TEA' ? 'bg-white text-accent shadow-sm' : 'text-tea-500 hover:text-tea-700'}`}
+                                    >
+                                        <Leaf size={14} /> 茶品
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setFormData({...formData, type: 'TEAWARE'})}
+                                        className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-all flex items-center justify-center gap-2 ${formData.type === 'TEAWARE' ? 'bg-white text-clay shadow-sm' : 'text-tea-500 hover:text-tea-700'}`}
+                                    >
+                                        <Coffee size={14} /> 茶器
+                                    </button>
                                  </div>
+
+                                 <Input label="名称" value={formData.name} onChange={(e:any)=>setFormData({...formData, name:e.target.value})} required placeholder="例如：2003年易武正山野生茶"/>
+                                 
                                  <div className="grid grid-cols-2 gap-4">
-                                     <Input label="产地" value={formData.origin} onChange={(e:any)=>setFormData({...formData, origin:e.target.value})}/>
+                                     <Combobox 
+                                        label="分类" 
+                                        value={formData.category} 
+                                        onChange={(e:any)=>setFormData({...formData, category:e.target.value})}
+                                        options={formData.type === 'TEA' ? SUGGESTIONS.TEA.category : SUGGESTIONS.TEAWARE.category}
+                                        placeholder={formData.type === 'TEA' ? '例如：普洱 (生)' : '例如：紫砂壶'}
+                                     />
+                                     <Input label="年份" value={formData.year} onChange={(e:any)=>setFormData({...formData, year:e.target.value})} placeholder="例如：2018"/>
+                                 </div>
+                                 
+                                 <div className="grid grid-cols-2 gap-4">
+                                     <Combobox 
+                                        label="产地" 
+                                        value={formData.origin} 
+                                        onChange={(e:any)=>setFormData({...formData, origin:e.target.value})}
+                                        options={formData.type === 'TEA' ? SUGGESTIONS.TEA.origin : SUGGESTIONS.TEAWARE.origin}
+                                        placeholder="例如：云南"
+                                     />
                                      <Input 
                                         label="总价" 
                                         type="number" 
                                         value={formData.price} 
                                         onChange={(e:any)=>setFormData({...formData, price:parseFloat(e.target.value)||0})}
                                         rightLabel={derivedUnitPrice > 0 && <span className="text-xs text-tea-400 font-normal">{formatUnitPrice(derivedUnitPrice, formData.unit || '')}</span>}
+                                        placeholder="0"
                                      />
                                  </div>
+                                 
                                  {!item && (
-                                     <div className="flex gap-2">
-                                         <Input label="初始数量" type="number" value={formData.quantity} onChange={(e:any)=>setFormData({...formData, quantity:parseFloat(e.target.value)||0})} className="flex-1"/>
-                                         <div className="w-1/3 pt-6">
-                                            <select className="w-full p-2 border rounded" value={formData.unit} onChange={e=>setFormData({...formData, unit:e.target.value})}>
-                                                {TEA_UNITS.map(u=><option key={u}>{u}</option>)}
-                                            </select>
+                                     <div className="flex gap-2 items-end">
+                                         <div className="flex-1">
+                                             <Input label="初始数量" type="number" value={formData.quantity} onChange={(e:any)=>setFormData({...formData, quantity:parseFloat(e.target.value)||0})}/>
+                                         </div>
+                                         <div className="w-1/3">
+                                            <div className="relative">
+                                                <select 
+                                                    className="w-full px-3 py-2 bg-white/50 border border-tea-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-accent/50 appearance-none text-tea-800 text-sm h-[38px]" 
+                                                    value={formData.unit} 
+                                                    onChange={e=>setFormData({...formData, unit:e.target.value})}
+                                                >
+                                                    {(formData.type === 'TEA' ? TEA_UNITS : TEAWARE_UNITS).map(u=><option key={u}>{u}</option>)}
+                                                </select>
+                                                <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 text-tea-400 pointer-events-none" size={14}/>
+                                            </div>
                                          </div>
                                      </div>
                                  )}
-                                 <div className="flex justify-end gap-2 pt-4">
+
+                                 <div className="flex justify-end gap-2 pt-4 border-t border-tea-50 mt-2">
                                      {item && <Button type="button" variant="danger" onClick={()=>onDelete(item.id)}><Trash2 size={16}/></Button>}
                                      <Button variant="secondary" onClick={onClose}>取消</Button>
                                      <Button type="submit">保存</Button>
@@ -1408,6 +1544,7 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, onStockUpdate, con
     );
 };
 
+// ... (InventoryManager code)
 const InventoryManager = ({ item, logs, isLoading, onUpdate }: any) => {
     // (Same simple implementation as before)
     const [mode, setMode] = useState<'IN'|'OUT'>('OUT');
