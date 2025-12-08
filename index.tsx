@@ -138,6 +138,14 @@ const formatUnitPrice = (price: number, unit: string) => {
     return `≈ ${new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY' }).format(price)} / ${unit.split(' ')[0]}`;
 };
 
+// --- Helper: Check for DB Schema Errors ---
+const isDbSchemaError = (msg: string) => {
+    if (!msg) return false;
+    const m = msg.toLowerCase();
+    // Catch common PG errors: relation (table) missing, column missing
+    return m.includes('relation') || m.includes('does not exist') || m.includes('column') || m.includes('undefined table');
+};
+
 // --- Components ---
 
 const Button = ({ children, onClick, variant = 'primary', className = '', disabled = false, type = 'button', size = 'md' }: any) => {
@@ -319,6 +327,11 @@ const App = () => {
   const [editingItem, setEditingItem] = useState<TeaItem | null>(null);
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
 
+  // Global handler for database schema errors
+  const triggerDbInit = () => {
+    setIsDbInitOpen(true);
+  };
+
   const greeting = useMemo(() => {
     const hour = new Date().getHours();
     if (hour < 5) return '夜深了';
@@ -382,7 +395,7 @@ const App = () => {
       }
     } catch (error: any) {
       console.error('Error fetching tea items:', error);
-      if (error.message && (error.message.includes('relation "tea_items" does not exist') || error.message.includes('does not exist'))) {
+      if (isDbSchemaError(error.message)) {
            setDbError('TABLE_MISSING');
            setIsDbInitOpen(true);
       }
@@ -491,7 +504,11 @@ const App = () => {
             setEditingItem(null);
         }
     } catch (e: any) {
-        alert(`保存失败: ${e.message}`);
+        if(isDbSchemaError(e.message)) {
+            triggerDbInit();
+        } else {
+            alert(`保存失败: ${e.message}`);
+        }
     }
   };
 
@@ -523,9 +540,13 @@ const App = () => {
         setEditingItem(parsedUpdatedItem);
         return true;
       }
-    } catch (e) {
-      alert("库存更新失败");
-      return false;
+    } catch (e: any) {
+       if(isDbSchemaError(e.message)) {
+          triggerDbInit();
+       } else {
+          alert("库存更新失败");
+       }
+       return false;
     }
     return false;
   };
@@ -776,6 +797,7 @@ const App = () => {
           setUser={setUser}
           onLogout={handleLogout}
           onChangePassword={() => setIsPasswordModalOpen(true)}
+          onDbError={triggerDbInit}
         />
       )}
 
@@ -797,7 +819,6 @@ const App = () => {
   );
 };
 
-// ... (LoginScreen, ChangePasswordModal remain mostly same)
 // --- Login Screen ---
 const LoginScreen = ({ onLogin }: any) => {
     const [username, setUsername] = useState('');
@@ -820,7 +841,9 @@ const LoginScreen = ({ onLogin }: any) => {
             if(res.ok) {
                 onLogin(data.user, data.token);
             } else {
-                setError(data.error || '登录失败');
+                // If the error message indicates a DB issue, show the fix button
+                const msg = data.error || '登录失败';
+                setError(msg);
             }
         } catch(e) {
             setError('网络错误，无法连接到服务器');
@@ -872,9 +895,9 @@ const LoginScreen = ({ onLogin }: any) => {
                                 <span>{error}</span>
                             </div>
                             
-                            {(error.includes('relation') || error.includes('does not exist')) && (
+                            {isDbSchemaError(error) && (
                                 <div className="pt-1 border-t border-red-100 mt-1">
-                                    <p className="text-xs text-red-500 mb-2">检测到数据库结构缺失，请初始化。</p>
+                                    <p className="text-xs text-red-500 mb-2">检测到数据库结构不匹配 (如缺失字段)，请初始化。</p>
                                     <Button 
                                         type="button" 
                                         variant="danger" 
@@ -882,7 +905,7 @@ const LoginScreen = ({ onLogin }: any) => {
                                         className="w-full"
                                         onClick={() => setShowInit(true)}
                                     >
-                                        <Database size={14}/> 初始化数据库
+                                        <Database size={14}/> 修复数据库结构
                                     </Button>
                                 </div>
                             )}
@@ -909,6 +932,7 @@ const LoginScreen = ({ onLogin }: any) => {
     );
 };
 
+// ... (ChangePasswordModal remain same)
 const ChangePasswordModal = ({ isOpen, onClose, forced }: any) => {
     // (Same as before)
     const [pass, setPass] = useState('');
@@ -957,7 +981,7 @@ const ChangePasswordModal = ({ isOpen, onClose, forced }: any) => {
 };
 
 // --- User Management Panel (Inside Settings) ---
-const UserManagement = () => {
+const UserManagement = ({ onDbError }: any) => {
     const [users, setUsers] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
     const [newUser, setNewUser] = useState({username: '', password: '', nickname: ''});
@@ -969,24 +993,36 @@ const UserManagement = () => {
         try {
             const res = await authFetch('/api/auth?action=list_users');
             const json = await res.json();
-            if(res.ok) setUsers(json.data);
+            if(res.ok) {
+                setUsers(json.data);
+            } else {
+                if(isDbSchemaError(json.error)) onDbError();
+            }
+        } catch(e: any) {
+             console.error(e);
         } finally { setLoading(false); }
     };
 
     const addUser = async (e: React.FormEvent) => {
         e.preventDefault();
         if(!newUser.username || !newUser.password) return;
-        const res = await authFetch('/api/auth?action=create_user', {
-            method: 'POST',
-            body: JSON.stringify(newUser)
-        });
-        if(res.ok) {
-            setNewUser({username:'', password:'', nickname: ''});
-            loadUsers();
-        } else {
-            const j = await res.json();
-            alert(j.error);
-        }
+        try {
+            const res = await authFetch('/api/auth?action=create_user', {
+                method: 'POST',
+                body: JSON.stringify(newUser)
+            });
+            if(res.ok) {
+                setNewUser({username:'', password:'', nickname: ''});
+                loadUsers();
+            } else {
+                const j = await res.json();
+                if(isDbSchemaError(j.error)) {
+                    onDbError();
+                } else {
+                    alert(j.error);
+                }
+            }
+        } catch(e) { alert('网络错误'); }
     };
 
     const deleteUser = async (id: string) => {
@@ -1006,16 +1042,20 @@ const UserManagement = () => {
 
     const saveEdit = async () => {
         if (!editingUserId) return;
-        const res = await authFetch('/api/auth?action=admin_update_user', {
-            method: 'POST',
-            body: JSON.stringify({id: editingUserId, nickname: editNickname})
-        });
-        if (res.ok) {
-            setEditingUserId(null);
-            loadUsers();
-        } else {
-            alert('修改失败');
-        }
+        try {
+            const res = await authFetch('/api/auth?action=admin_update_user', {
+                method: 'POST',
+                body: JSON.stringify({id: editingUserId, nickname: editNickname})
+            });
+            if (res.ok) {
+                setEditingUserId(null);
+                loadUsers();
+            } else {
+                const j = await res.json();
+                if (isDbSchemaError(j.error)) onDbError();
+                else alert('修改失败');
+            }
+        } catch(e) { alert('请求失败'); }
     };
 
     useEffect(() => { loadUsers(); }, []);
@@ -1085,7 +1125,7 @@ const UserManagement = () => {
 
 // ... (ItemModal, DbInitModal, InventoryManager remain same)
 
-const SettingsModal = ({ isOpen, onClose, config, serverConfig, isEnvLoading, onSave, user, setUser, onLogout, onChangePassword }: any) => {
+const SettingsModal = ({ isOpen, onClose, config, serverConfig, isEnvLoading, onSave, user, setUser, onLogout, onChangePassword, onDbError }: any) => {
     const [localConfig, setLocalConfig] = useState(config);
     const [tab, setTab] = useState<'SYSTEM' | 'USERS'>('SYSTEM');
     const [nickname, setNickname] = useState(user?.nickname || '');
@@ -1096,19 +1136,23 @@ const SettingsModal = ({ isOpen, onClose, config, serverConfig, isEnvLoading, on
 
     const handleUpdateNickname = async () => {
         if (!nickname.trim()) return alert('昵称不能为空');
-        const res = await authFetch('/api/auth?action=update_profile', {
-            method: 'POST',
-            body: JSON.stringify({ nickname })
-        });
-        if (res.ok) {
-            const data = await res.json();
-            const updatedUser = { ...user, nickname: data.nickname };
-            setUser(updatedUser);
-            localStorage.setItem('tea_user', JSON.stringify(updatedUser));
-            setIsEditingNick(false);
-        } else {
-            alert('修改失败');
-        }
+        try {
+            const res = await authFetch('/api/auth?action=update_profile', {
+                method: 'POST',
+                body: JSON.stringify({ nickname })
+            });
+            if (res.ok) {
+                const data = await res.json();
+                const updatedUser = { ...user, nickname: data.nickname };
+                setUser(updatedUser);
+                localStorage.setItem('tea_user', JSON.stringify(updatedUser));
+                setIsEditingNick(false);
+            } else {
+                const j = await res.json();
+                if(isDbSchemaError(j.error)) onDbError();
+                else alert('修改失败');
+            }
+        } catch(e) { alert('请求失败'); }
     };
 
     if (!isOpen) return null;
@@ -1133,7 +1177,7 @@ const SettingsModal = ({ isOpen, onClose, config, serverConfig, isEnvLoading, on
 
                 <div className="flex-1 overflow-y-auto pr-2">
                     {tab === 'USERS' && user?.role === 'admin' ? (
-                        <UserManagement />
+                        <UserManagement onDbError={onDbError} />
                     ) : (
                         <div className="space-y-6">
                             {/* Profile Section */}
@@ -1227,15 +1271,20 @@ const DbInitModal = ({ isOpen, onClose }: any) => {
     };
     if (!isOpen) return null;
     return (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-stone-900/60 backdrop-blur-sm" onClick={onClose} />
-            <div className="bg-white rounded-xl w-full max-w-lg p-6 relative shadow-2xl">
-                 <h3 className="font-bold text-xl mb-4">初始化数据库</h3>
-                 <p className="text-sm text-tea-500 mb-6">检测到数据库结构不完整，点击下方按钮自动修复表结构。</p>
-                 {migrateStatus === 'ERROR' && <div className="bg-red-50 text-red-600 p-3 rounded mb-4 text-xs">{errorMessage}</div>}
-                 {migrateStatus === 'SUCCESS' && <div className="bg-green-50 text-green-600 p-3 rounded mb-4 text-xs">初始化成功！即将刷新...</div>}
-                 <Button onClick={handleAutoMigrate} disabled={isMigrating} className="w-full">
-                     {isMigrating ? <Loader2 className="animate-spin"/> : '立即执行初始化'}
+            <div className="bg-white rounded-xl w-full max-w-lg p-6 relative shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+                 <h3 className="font-bold text-xl mb-4 text-tea-900 flex items-center gap-2">
+                    <Database className="text-accent"/> 初始化数据库
+                 </h3>
+                 <p className="text-sm text-tea-500 mb-6 leading-relaxed">
+                    检测到您的数据库结构与当前版本不匹配（可能缺失字段或表）。<br/>
+                    请点击下方按钮自动修复表结构，这不会影响现有数据。
+                 </p>
+                 {migrateStatus === 'ERROR' && <div className="bg-red-50 text-red-600 p-3 rounded mb-4 text-xs font-mono break-all">{errorMessage}</div>}
+                 {migrateStatus === 'SUCCESS' && <div className="bg-green-50 text-green-600 p-3 rounded mb-4 text-xs flex items-center gap-2"><CheckCircle2 size={14}/> 初始化成功！即将刷新...</div>}
+                 <Button onClick={handleAutoMigrate} disabled={isMigrating} className="w-full h-12 text-base shadow-lg shadow-accent/20">
+                     {isMigrating ? <Loader2 className="animate-spin"/> : '立即执行修复与初始化'}
                  </Button>
             </div>
         </div>
