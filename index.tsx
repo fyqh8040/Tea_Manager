@@ -456,12 +456,16 @@ const App = () => {
     if (editingItem?.id === id) setIsModalOpen(false);
 
     try {
-        await authFetch('/api/data?action=delete', {
+        const res = await authFetch('/api/data?action=delete', {
             method: 'POST',
             body: JSON.stringify({ id })
         });
-    } catch (error) {
-        alert('删除失败，数据已恢复');
+        if (!res.ok) {
+            const errorData = await res.json();
+            throw new Error(errorData.error || 'Delete failed');
+        }
+    } catch (error: any) {
+        alert(`删除失败: ${error.message}`);
         setItems(previousItems);
     }
   };

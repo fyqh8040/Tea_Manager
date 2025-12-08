@@ -70,7 +70,8 @@ export default async function handler(req, res) {
     // --- POST Requests ---
     if (method === 'POST') {
       const body = req.body;
-      const op = body.action || 'create';
+      // 关键修复：优先使用 body.action，如果没有则使用 query.action，最后才默认为 create
+      const op = body.action || action || 'create';
 
       // 1. Delete (Ensure ownership)
       if (op === 'delete') {
@@ -82,6 +83,11 @@ export default async function handler(req, res) {
       // 2. Create / Update
       if (op === 'create' || op === 'update') {
         const itemData = body.data;
+        // 防御性检查：如果没有 data 数据，直接返回错误，避免崩溃
+        if (!itemData) {
+            return res.status(400).json({ error: 'Missing item data' });
+        }
+
         let computedUnitPrice = 0;
         const qty = parseFloat(itemData.quantity);
         const totalPrice = parseFloat(itemData.price);
