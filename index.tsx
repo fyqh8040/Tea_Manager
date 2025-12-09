@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createRoot } from 'react-dom/client';
 import { 
@@ -880,9 +879,11 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, onStockUpdate }: a
                      <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                         <Button size="sm" variant="secondary" onClick={()=>fileInputRef.current?.click()} className="shadow-lg"><Upload size={16}/> 更换图片</Button>
                      </div>
-                     <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
                  </div>
                  <div className="flex-1 flex flex-col h-full overflow-hidden">
+                     {/* Moved input out of hidden div to ensure it's accessible */}
+                     <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
+                     
                      {item && (
                          <div className="flex border-b border-tea-100">
                              <button onClick={()=>setActiveTab('DETAILS')} className={`flex-1 py-3 text-sm font-bold ${activeTab==='DETAILS'?'text-accent border-b-2 border-accent':'text-tea-400'}`}>详情</button>
@@ -892,6 +893,29 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, onStockUpdate }: a
                      <div className="flex-1 overflow-y-auto p-6">
                          {activeTab==='DETAILS' || !item ? (
                              <form onSubmit={(e)=>{e.preventDefault(); onSave(formData);}} className="space-y-5">
+                                 
+                                 {/* Mobile Image Upload (Visible only on small screens) */}
+                                 <div className="md:hidden">
+                                     <div 
+                                         onClick={() => fileInputRef.current?.click()}
+                                         className="relative w-full aspect-video bg-tea-50 rounded-lg border border-tea-200 border-dashed flex items-center justify-center overflow-hidden cursor-pointer active:scale-98 transition-transform"
+                                     >
+                                         {formData.image_url ? (
+                                             <>
+                                                 <img src={formData.image_url} className="w-full h-full object-cover" />
+                                                 <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
+                                                     <Camera className="text-white" size={24} />
+                                                 </div>
+                                             </>
+                                         ) : (
+                                             <div className="flex flex-col items-center gap-2 text-tea-400">
+                                                 <Camera size={32} />
+                                                 <span className="text-xs font-medium">点击上传图片</span>
+                                             </div>
+                                         )}
+                                     </div>
+                                 </div>
+
                                  <div className="flex bg-tea-100 p-1 rounded-lg">
                                     <button type="button" onClick={() => setFormData({...formData, type: 'TEA', unit: TEA_UNITS[0]})} className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-all flex items-center justify-center gap-2 ${formData.type === 'TEA' ? 'bg-white text-accent shadow-sm' : 'text-tea-500 hover:text-tea-700'}`}>
                                         <Leaf size={14} /> 茶品
