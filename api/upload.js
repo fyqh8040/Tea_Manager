@@ -18,13 +18,21 @@ export default async function handler(req, res) {
       throw new Error('Server Error: NEXT_PUBLIC_IMAGE_API_URL not configured');
     }
 
-    // 处理 API URL，确保以 /upload 结尾
-    let apiUrl = targetUrl.replace(/\/$/, '');
-    if (!apiUrl.endsWith('/upload')) {
-        apiUrl += '/upload';
+    // 1. 构造上游 URL 对象
+    let apiUrlStr = targetUrl.replace(/\/$/, '');
+    if (!apiUrlStr.endsWith('/upload')) {
+        apiUrlStr += '/upload';
+    }
+    const upstreamUrl = new URL(apiUrlStr);
+
+    // 2. 处理 Query 参数转发 (根据文档，uploadFolder 是 Query 参数)
+    // 从 req.query 中获取 uploadFolder，并添加到上游 URL 的 searchParams 中
+    const { uploadFolder } = req.query;
+    if (uploadFolder) {
+        upstreamUrl.searchParams.set('uploadFolder', uploadFolder);
     }
 
-    // 读取请求流到 Buffer (兼容性更好的方式，避免某些 Node 环境下的 stream 问题)
+    // 读取请求流到 Buffer
     const chunks = [];
     for await (const chunk of req) {
       chunks.push(chunk);
@@ -33,7 +41,6 @@ export default async function handler(req, res) {
 
     // 构造转发头
     const headers = {
-      // 关键：透传客户端的 Content-Type (包含 boundary 信息)
       'Content-Type': req.headers['content-type'],
     };
     if (token) {
@@ -41,7 +48,7 @@ export default async function handler(req, res) {
     }
 
     // 服务端转发请求
-    const response = await fetch(apiUrl, {
+    const response = await fetch(upstreamUrl.toString(), {
       method: 'POST',
       headers: headers,
       body: buffer
