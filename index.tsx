@@ -724,6 +724,7 @@ const App = () => {
           onSave={handleSave}
           onDelete={handleDelete}
           onStockUpdate={handleStockUpdate}
+          config={serverConfig} // <-- Pass config here
         />
       )}
 
@@ -824,11 +825,12 @@ const LoginScreen = ({ onLogin }: any) => {
     );
 };
 
-const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, onStockUpdate }: any) => {
+const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, onStockUpdate, config }: any) => {
     const [activeTab, setActiveTab] = useState<'DETAILS' | 'HISTORY'>('DETAILS');
     const [formData, setFormData] = useState<Partial<TeaItem>>({ type: 'TEA', name: '', category: '', year: '', origin: '', description: '', image_url: '', quantity: 1, unit: '克 (g)', price: 0, unit_price: 0 });
     const [logs, setLogs] = useState<InventoryLog[]>([]);
     const [isLoadingLogs, setIsLoadingLogs] = useState(false);
+    const [isUploading, setIsUploading] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
@@ -861,9 +863,76 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, onStockUpdate }: a
     const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
-        const reader = new FileReader();
-        reader.onload = () => setFormData(prev => ({ ...prev, image_url: reader.result as string }));
-        reader.readAsDataURL(file);
+
+        // 优先尝试图床上传
+        if (config?.imageApiUrl) {
+            setIsUploading(true);
+            try {
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('folder', 'tea_image'); // 用户指定文件夹
+
+                // 处理 API URL，确保以 /upload 结尾 (如果是根域名)
+                let apiUrl = config.imageApiUrl.replace(/\/$/, '');
+                if (!apiUrl.endsWith('/upload')) {
+                    apiUrl += '/upload';
+                }
+
+                const headers: any = {};
+                if (config.imageApiToken) {
+                    headers['Authorization'] = `Bearer ${config.imageApiToken}`;
+                }
+
+                const res = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: headers,
+                    body: formData
+                });
+
+                if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
+                
+                const data = await res.json();
+                let remoteUrl = '';
+
+                // 解析常见图床响应格式
+                if (Array.isArray(data) && data[0]?.src) {
+                    // Telegraph 格式: [{ src: "/file/xxx" }]
+                    const src = data[0].src;
+                    if (src.startsWith('http')) remoteUrl = src;
+                    else {
+                        // 如果是相对路径，拼接到图床域名 (去掉 /upload 后缀的 BaseUrl)
+                        const baseUrl = apiUrl.replace(/\/upload\/?$/, '');
+                        remoteUrl = `${baseUrl}${src}`;
+                    }
+                } else if (data.url) {
+                    remoteUrl = data.url;
+                } else if (data.data?.url) {
+                    remoteUrl = data.data.url;
+                }
+
+                if (remoteUrl) {
+                    setFormData(prev => ({ ...prev, image_url: remoteUrl }));
+                } else {
+                    console.warn('Unknown response format:', data);
+                    throw new Error('无法解析图床返回的图片地址');
+                }
+
+            } catch (err: any) {
+                console.error("Image upload error:", err);
+                alert(`图床上传失败，将使用本地存储。\n错误信息: ${err.message}`);
+                // 降级处理：转 Base64
+                const reader = new FileReader();
+                reader.onload = () => setFormData(prev => ({ ...prev, image_url: reader.result as string }));
+                reader.readAsDataURL(file);
+            } finally {
+                setIsUploading(false);
+            }
+        } else {
+            // 无图床配置，直接转 Base64
+            const reader = new FileReader();
+            reader.onload = () => setFormData(prev => ({ ...prev, image_url: reader.result as string }));
+            reader.readAsDataURL(file);
+        }
     };
 
     if(!isOpen) return null;
@@ -873,11 +942,20 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, onStockUpdate }: a
              <div className="bg-[#fcfcfb] rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col md:flex-row shadow-2xl">
                  <div className="hidden md:block w-5/12 bg-tea-100 relative group">
                      {formData.image_url ? 
-                        <img src={formData.image_url} className="w-full h-full object-cover"/> : 
+                        <img src={formData.image_url} className={`w-full h-full object-cover ${isUploading ? 'opacity-50 blur-sm' : ''}`}/> : 
                         <div className="w-full h-full flex items-center justify-center text-tea-300 bg-tea-50/50"><Camera size={48}/></div>
                      }
-                     <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                        <Button size="sm" variant="secondary" onClick={()=>fileInputRef.current?.click()} className="shadow-lg"><Upload size={16}/> 更换图片</Button>
+                     
+                     {/* Overlay for Loading or Hover */}
+                     <div className={`absolute inset-0 bg-black/20 flex items-center justify-center transition-opacity ${isUploading ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                        {isUploading ? (
+                            <div className="flex flex-col items-center text-white">
+                                <Loader2 size={24} className="animate-spin mb-2"/>
+                                <span className="text-xs font-medium">上传中...</span>
+                            </div>
+                        ) : (
+                            <Button size="sm" variant="secondary" onClick={()=>fileInputRef.current?.click()} className="shadow-lg"><Upload size={16}/> 更换图片</Button>
+                        )}
                      </div>
                  </div>
                  <div className="flex-1 flex flex-col h-full overflow-hidden">
@@ -897,20 +975,27 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, onStockUpdate }: a
                                  {/* Mobile Image Upload (Visible only on small screens) */}
                                  <div className="md:hidden">
                                      <div 
-                                         onClick={() => fileInputRef.current?.click()}
+                                         onClick={() => !isUploading && fileInputRef.current?.click()}
                                          className="relative w-full aspect-video bg-tea-50 rounded-lg border border-tea-200 border-dashed flex items-center justify-center overflow-hidden cursor-pointer active:scale-98 transition-transform"
                                      >
                                          {formData.image_url ? (
                                              <>
-                                                 <img src={formData.image_url} className="w-full h-full object-cover" />
-                                                 <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
-                                                     <Camera className="text-white" size={24} />
-                                                 </div>
+                                                 <img src={formData.image_url} className={`w-full h-full object-cover ${isUploading ? 'opacity-50 blur-sm' : ''}`} />
+                                                 {isUploading && (
+                                                     <div className="absolute inset-0 flex items-center justify-center bg-black/10">
+                                                        <Loader2 size={24} className="animate-spin text-tea-600"/>
+                                                     </div>
+                                                 )}
+                                                 {!isUploading && (
+                                                    <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
+                                                        <Camera className="text-white" size={24} />
+                                                    </div>
+                                                 )}
                                              </>
                                          ) : (
                                              <div className="flex flex-col items-center gap-2 text-tea-400">
-                                                 <Camera size={32} />
-                                                 <span className="text-xs font-medium">点击上传图片</span>
+                                                 {isUploading ? <Loader2 size={24} className="animate-spin"/> : <Camera size={32} />}
+                                                 <span className="text-xs font-medium">{isUploading ? '上传中...' : '点击上传图片'}</span>
                                              </div>
                                          )}
                                      </div>
@@ -968,9 +1053,9 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, onStockUpdate }: a
                                  )}
 
                                  <div className="flex justify-end gap-2 pt-4 border-t border-tea-50 mt-2">
-                                     {item && <Button type="button" variant="danger" onClick={()=>onDelete(item.id)}><Trash2 size={16}/></Button>}
-                                     <Button variant="secondary" onClick={onClose}>取消</Button>
-                                     <Button type="submit">保存</Button>
+                                     {item && <Button type="button" variant="danger" onClick={()=>onDelete(item.id)} disabled={isUploading}><Trash2 size={16}/></Button>}
+                                     <Button variant="secondary" onClick={onClose} disabled={isUploading}>取消</Button>
+                                     <Button type="submit" disabled={isUploading}>{isUploading ? '上传中...' : '保存'}</Button>
                                  </div>
                              </form>
                          ) : (
@@ -990,126 +1075,289 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, onStockUpdate }: a
 };
 
 const InventoryManager = ({ item, logs, isLoading, onUpdate }: any) => {
-    const [mode, setMode] = useState<'IN'|'OUT'>('OUT');
-    const [amount, setAmount] = useState('');
-    const [reason, setReason] = useState('CONSUMPTION');
+    const [amount, setAmount] = useState<number | ''>('');
+    const [reason, setReason] = useState('PURCHASE');
     const [note, setNote] = useState('');
-    
-    const handleSubmit = async (e:any) => {
-        e.preventDefault();
-        const val = parseFloat(amount);
-        if(!val) return;
-        
-        let finalReason = reason;
-        if (mode === 'IN' && reason === 'CONSUMPTION') finalReason = 'PURCHASE'; 
-        if (mode === 'OUT' && reason === 'PURCHASE') finalReason = 'CONSUMPTION';
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [mode, setMode] = useState<'IN' | 'OUT'>('IN');
 
-        const finalAmt = mode==='IN'? val : -val;
-        if(await onUpdate(finalAmt, finalReason, note)) { setAmount(''); setNote(''); }
+    const handleSubmit = async () => {
+        if (!amount || Number(amount) <= 0) return alert('请输入有效数量');
+        setIsSubmitting(true);
+        const finalAmount = mode === 'IN' ? Number(amount) : -Number(amount);
+        const success = await onUpdate(finalAmount, reason, note);
+        if (success) {
+            setAmount('');
+            setNote('');
+            setReason(mode === 'IN' ? 'PURCHASE' : 'CONSUMPTION');
+        }
+        setIsSubmitting(false);
     };
-    
-    const reasons = mode === 'IN' 
-    ? [{v: 'PURCHASE', l: '新购入库'}, {v: 'GIFT', l: '获赠'}, {v: 'ADJUSTMENT', l: '盘盈调整'}, {v: 'RETURN', l: '退货入库'}]
-    : [{v: 'CONSUMPTION', l: '品饮/使用'}, {v: 'GIFT', l: '赠友'}, {v: 'LOSS', l: '损耗/遗失'}, {v: 'ADJUSTMENT', l: '盘亏调整'}];
 
     return (
-        <div className="space-y-4">
-            <div className="bg-tea-50 p-4 rounded-lg">
-                <div className="flex gap-2 mb-2">
-                    <button onClick={()=>setMode('OUT')} className={`px-3 py-1 rounded text-sm font-bold ${mode==='OUT'?'bg-amber-100 text-amber-800':'text-gray-400'}`}>出库</button>
-                    <button onClick={()=>setMode('IN')} className={`px-3 py-1 rounded text-sm font-bold ${mode==='IN'?'bg-green-100 text-green-800':'text-gray-400'}`}>入库</button>
+        <div className="space-y-6">
+            <div className="bg-tea-50 p-4 rounded-xl border border-tea-100">
+                <div className="flex items-center justify-between mb-4">
+                     <h4 className="font-bold text-tea-800 text-sm uppercase tracking-wider">库存变动</h4>
+                     <div className="flex bg-white rounded-lg p-0.5 border border-tea-100">
+                         <button onClick={()=>{setMode('IN'); setReason('PURCHASE')}} className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${mode==='IN'?'bg-accent text-white shadow-sm':'text-tea-400 hover:text-tea-600'}`}>入库</button>
+                         <button onClick={()=>{setMode('OUT'); setReason('CONSUMPTION')}} className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${mode==='OUT'?'bg-accent text-white shadow-sm':'text-tea-400 hover:text-tea-600'}`}>出库</button>
+                     </div>
                 </div>
-                <form onSubmit={handleSubmit} className="space-y-2">
-                    <Input type="number" placeholder="数量" value={amount} onChange={(e:any)=>setAmount(e.target.value)}/>
-                    <div className="space-y-1.5">
-                            <label className="text-xs font-semibold text-tea-500 uppercase tracking-wider">变动原因</label>
-                            <select className="w-full px-3 py-2 bg-white border border-tea-200 rounded-lg text-sm h-[38px]" value={reason} onChange={(e) => setReason(e.target.value)}>
-                                {reasons.map(r => <option key={r.v} value={r.v}>{r.l}</option>)}
-                            </select>
+                <div className="grid grid-cols-12 gap-3">
+                    <div className="col-span-4">
+                         <Input 
+                            label={mode === 'IN' ? '入库数量' : '出库数量'} 
+                            type="number" 
+                            value={amount} 
+                            onChange={(e:any)=>setAmount(e.target.value)} 
+                            placeholder="0"
+                            prefixicon={mode==='IN'?<Plus size={14}/>:<span className="text-lg leading-none">-</span>}
+                         />
                     </div>
-                    <Input placeholder="备注" value={note} onChange={(e:any)=>setNote(e.target.value)}/>
-                    <Button type="submit" size="sm" className="w-full">确认</Button>
-                </form>
+                    <div className="col-span-4">
+                         <div className="space-y-1.5">
+                            <label className="text-xs font-semibold text-tea-500 uppercase tracking-wider">原因</label>
+                            <div className="relative">
+                                <select className="w-full px-3 py-2 bg-white/50 border border-tea-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-accent/50 appearance-none text-tea-800 text-sm h-[38px]" value={reason} onChange={e=>setReason(e.target.value)}>
+                                    {mode === 'IN' ? (
+                                        <>
+                                            <option value="PURCHASE">新购入库</option>
+                                            <option value="GIFT">获赠</option>
+                                            <option value="ADJUSTMENT">盘盈调整</option>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <option value="CONSUMPTION">品饮/使用</option>
+                                            <option value="GIFT">赠友</option>
+                                            <option value="LOSS">损耗/遗失</option>
+                                            <option value="ADJUSTMENT">盘亏调整</option>
+                                        </>
+                                    )}
+                                </select>
+                                <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 text-tea-400 pointer-events-none" size={14}/>
+                            </div>
+                         </div>
+                    </div>
+                    <div className="col-span-4 flex items-end">
+                         <Button onClick={handleSubmit} disabled={isSubmitting} className="w-full h-[38px]">{isSubmitting ? <Loader2 className="animate-spin"/> : '确认'}</Button>
+                    </div>
+                    <div className="col-span-12">
+                        <Input label="备注 (可选)" value={note} onChange={(e:any)=>setNote(e.target.value)} placeholder="记录一些细节..."/>
+                    </div>
+                </div>
             </div>
-            <div className="space-y-2 max-h-60 overflow-y-auto">
-                {logs.map((l:any)=>(
-                    <div key={l.id} className="text-sm p-2 border-b flex justify-between">
-                        <span>{formatReason(l.reason, l.change_amount)} {l.change_amount>0?`+${l.change_amount}`:l.change_amount}</span>
-                        <span className="text-gray-400">{new Date(l.created_at).toLocaleDateString()}</span>
+
+            <div>
+                <h4 className="font-bold text-tea-800 text-sm uppercase tracking-wider mb-3">历史记录</h4>
+                {isLoading ? (
+                    <div className="py-10 flex justify-center"><Loader2 className="animate-spin text-tea-300"/></div>
+                ) : logs.length === 0 ? (
+                    <div className="text-center py-8 text-tea-400 text-sm bg-tea-50/50 rounded-xl border border-dashed border-tea-200">暂无记录</div>
+                ) : (
+                    <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                        {logs.map((log: any) => (
+                            <div key={log.id} className="flex items-center justify-between p-3 bg-white border border-tea-50 rounded-lg shadow-sm">
+                                <div className="flex items-center gap-3">
+                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${log.change_amount > 0 ? 'bg-green-50 text-green-600' : 'bg-amber-50 text-amber-600'}`}>
+                                        {log.change_amount > 0 ? <Plus size={14}/> : <span className="font-bold text-lg leading-none">-</span>}
+                                    </div>
+                                    <div>
+                                        <div className="text-sm font-bold text-tea-700">{formatReason(log.reason, log.change_amount)} <span className={`ml-1 ${log.change_amount > 0 ? 'text-green-600' : 'text-amber-600'}`}>{log.change_amount > 0 ? '+' : ''}{log.change_amount}</span> <span className="text-xs text-tea-400 font-normal">{item.unit}</span></div>
+                                        <div className="text-xs text-tea-400">{new Date(log.created_at).toLocaleString()} {log.note && <span className="text-tea-300">| {log.note}</span>}</div>
+                                    </div>
+                                </div>
+                                <div className="text-xs font-mono text-tea-300">
+                                    结余: {log.current_balance}
+                                </div>
+                            </div>
+                        ))}
                     </div>
-                ))}
+                )}
             </div>
         </div>
     );
 };
 
-const SettingsModal = ({ isOpen, onClose, user, setUser, onLogout, onChangePassword, onDbError, config }: any) => {
-    const [tab, setTab] = useState<'SYSTEM' | 'USERS'>('SYSTEM');
-    const [nickname, setNickname] = useState(user?.nickname || '');
-    const [isEditingNick, setIsEditingNick] = useState(false);
+const SettingsModal = ({ isOpen, onClose, config, user, setUser, onLogout, onChangePassword, onDbError }: any) => {
+    const [activeTab, setActiveTab] = useState('PROFILE');
+    const [users, setUsers] = useState<any[]>([]);
+    const [isLoadingUsers, setIsLoadingUsers] = useState(false);
+    
+    // User Management
+    const [newUserUser, setNewUserUser] = useState('');
+    const [newUserPass, setNewUserPass] = useState('');
+    const [newUserNick, setNewUserNick] = useState('');
 
-    const handleUpdateNickname = async () => {
-        if (!nickname.trim()) return alert('昵称不能为空');
-        const res = await authFetch('/api/auth?action=update_profile', { method: 'POST', body: JSON.stringify({ nickname }) });
-        if (res.ok) {
-            setUser({ ...user, nickname });
-            setIsEditingNick(false);
+    useEffect(() => {
+        if (isOpen && user?.role === 'admin' && activeTab === 'USERS') {
+            fetchUsers();
+        }
+    }, [isOpen, activeTab]);
+
+    const fetchUsers = async () => {
+        setIsLoadingUsers(true);
+        try {
+            const res = await authFetch('/api/auth?action=list_users');
+            const json = await res.json();
+            if (res.ok) setUsers(json.data);
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setIsLoadingUsers(false);
         }
     };
 
+    const handleCreateUser = async () => {
+        if (!newUserUser || !newUserPass) return alert('请填写完整');
+        try {
+            const res = await authFetch('/api/auth?action=create_user', {
+                method: 'POST',
+                body: JSON.stringify({ username: newUserUser, password: newUserPass, nickname: newUserNick })
+            });
+            if (res.ok) {
+                setNewUserUser(''); setNewUserPass(''); setNewUserNick('');
+                fetchUsers();
+            } else {
+                const json = await res.json();
+                alert(json.error);
+            }
+        } catch (e) {
+            alert('创建失败');
+        }
+    };
+
+    const handleDeleteUser = async (id: string) => {
+        if (!confirm('确定删除该用户吗？其所有藏品也将被删除！')) return;
+        try {
+            const res = await authFetch('/api/auth?action=delete_user', {
+                method: 'POST',
+                body: JSON.stringify({ id })
+            });
+            if (res.ok) fetchUsers();
+            else alert('删除失败');
+        } catch (e) { alert('Error'); }
+    };
+
+    const handleUpdateNickname = async (val: string) => {
+         try {
+             const res = await authFetch('/api/auth?action=update_profile', {
+                 method: 'POST',
+                 body: JSON.stringify({ nickname: val })
+             });
+             if (res.ok) {
+                 const u = { ...user, nickname: val };
+                 setUser(u);
+                 localStorage.setItem('tea_user', JSON.stringify(u));
+             }
+         } catch(e) {}
+    };
+
     if (!isOpen) return null;
+
     return (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-stone-900/40 backdrop-blur-sm" onClick={onClose} />
-            <div className="bg-white rounded-xl w-full max-w-2xl p-6 relative shadow-2xl flex flex-col max-h-[85vh]">
-                <div className="flex justify-between items-center mb-6">
-                    <h2 className="font-serif text-xl font-bold text-tea-900 flex items-center gap-2"><Settings className="text-tea-400"/> 设置</h2>
-                    <button onClick={onClose}><X size={20} className="text-tea-400"/></button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/40 backdrop-blur-sm">
+            <div className="bg-[#fcfcfb] rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+                <div className="px-6 py-4 border-b border-tea-100 flex justify-between items-center bg-white">
+                    <h3 className="text-lg font-bold text-tea-900 font-serif">设置</h3>
+                    <button onClick={onClose} className="text-tea-400 hover:text-tea-600"><X size={20}/></button>
                 </div>
-                <div className="flex items-center gap-4 mb-6 border-b border-tea-100 pb-1">
-                    <button onClick={()=>setTab('SYSTEM')} className={`pb-2 text-sm font-bold ${tab==='SYSTEM'?'text-accent border-b-2 border-accent':'text-tea-400'}`}>系统配置</button>
-                    {user?.role === 'admin' && <button onClick={()=>setTab('USERS')} className={`pb-2 text-sm font-bold ${tab==='USERS'?'text-accent border-b-2 border-accent':'text-tea-400'}`}>用户管理</button>}
+                
+                <div className="flex border-b border-tea-100 bg-tea-50/50">
+                    <button onClick={()=>setActiveTab('PROFILE')} className={`flex-1 py-3 text-sm font-bold transition-colors ${activeTab==='PROFILE'?'text-accent border-b-2 border-accent bg-white':'text-tea-500 hover:text-tea-700'}`}>个人中心</button>
+                    {user?.role === 'admin' && (
+                        <>
+                            <button onClick={()=>setActiveTab('USERS')} className={`flex-1 py-3 text-sm font-bold transition-colors ${activeTab==='USERS'?'text-accent border-b-2 border-accent bg-white':'text-tea-500 hover:text-tea-700'}`}>用户管理</button>
+                            <button onClick={()=>setActiveTab('SYSTEM')} className={`flex-1 py-3 text-sm font-bold transition-colors ${activeTab==='SYSTEM'?'text-accent border-b-2 border-accent bg-white':'text-tea-500 hover:text-tea-700'}`}>系统状态</button>
+                        </>
+                    )}
                 </div>
-                <div className="flex-1 overflow-y-auto pr-2">
-                    {tab === 'USERS' ? <UserManagement onDbError={onDbError} /> : (
+
+                <div className="p-6 overflow-y-auto">
+                    {activeTab === 'PROFILE' && (
                         <div className="space-y-6">
-                            <div className="bg-tea-50 p-4 rounded-lg border border-tea-100 flex justify-between items-center">
-                                <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-tea-600 shadow-sm border border-tea-200"><User size={20}/></div>
-                                    <div>
-                                        <div className="font-bold text-tea-900 flex items-center gap-2">
-                                            {isEditingNick ? (
-                                                <><input className="px-2 py-1 text-sm border rounded w-32" value={nickname} onChange={e => setNickname(e.target.value)} autoFocus/><button onClick={handleUpdateNickname}><CheckCircle2 size={16} className="text-green-600"/></button></>
-                                            ) : (
-                                                <>{user?.nickname} <button onClick={() => setIsEditingNick(true)}><Edit2 size={14} className="text-tea-300 hover:text-accent"/></button></>
-                                            )}
-                                        </div>
-                                        <div className="text-xs text-tea-500">角色: {user?.role === 'admin' ? '管理员' : '普通用户'}</div>
-                                    </div>
+                            <div className="flex items-center gap-4 p-4 bg-tea-50 rounded-xl border border-tea-100">
+                                <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center text-accent shadow-sm">
+                                    <User size={32}/>
+                                </div>
+                                <div>
+                                    <div className="font-bold text-tea-900 text-lg">{user.nickname}</div>
+                                    <div className="text-tea-400 text-sm">@{user.username} {user.role === 'admin' && <Badge color="accent">管理员</Badge>}</div>
+                                </div>
+                            </div>
+                            
+                            <Input label="修改昵称" value={user.nickname} onBlur={(e:any)=>handleUpdateNickname(e.target.value)} onChange={(e:any)=>setUser({...user, nickname: e.target.value})} />
+
+                            <div className="space-y-3 pt-4">
+                                <Button variant="secondary" className="w-full justify-start" onClick={onChangePassword}>
+                                    <Lock size={16}/> 修改密码
+                                </Button>
+                                <Button variant="danger" className="w-full justify-start" onClick={onLogout}>
+                                    <LogOut size={16}/> 退出登录
+                                </Button>
+                            </div>
+                        </div>
+                    )}
+
+                    {activeTab === 'USERS' && (
+                        <div className="space-y-6">
+                            <div className="bg-tea-50 p-4 rounded-xl border border-tea-100 space-y-3">
+                                <h4 className="font-bold text-xs text-tea-500 uppercase tracking-wider">添加用户</h4>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <Input placeholder="用户名" value={newUserUser} onChange={(e:any)=>setNewUserUser(e.target.value)}/>
+                                    <Input placeholder="密码" type="password" value={newUserPass} onChange={(e:any)=>setNewUserPass(e.target.value)}/>
                                 </div>
                                 <div className="flex gap-2">
-                                    <Button size="sm" variant="secondary" onClick={onChangePassword}>修改密码</Button>
-                                    <Button size="sm" variant="danger" onClick={onLogout}><LogOut size={14}/> 退出</Button>
+                                    <div className="flex-1"><Input placeholder="昵称 (可选)" value={newUserNick} onChange={(e:any)=>setNewUserNick(e.target.value)}/></div>
+                                    <Button onClick={handleCreateUser}>添加</Button>
                                 </div>
                             </div>
-                            <div>
-                                <h4 className="text-xs font-bold text-tea-400 uppercase tracking-wider mb-3">环境状态</h4>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                    <div className="p-3 border border-tea-100 rounded-lg flex items-center justify-between">
-                                        <div className="flex items-center gap-2 text-sm text-tea-600">
-                                            <Database size={16}/> <span>数据库</span>
+
+                            <div className="space-y-2">
+                                <h4 className="font-bold text-xs text-tea-500 uppercase tracking-wider mb-2">用户列表</h4>
+                                {isLoadingUsers ? <Loader2 className="animate-spin mx-auto text-tea-300"/> : users.map(u => (
+                                    <div key={u.id} className="flex items-center justify-between p-3 bg-white border border-tea-100 rounded-lg">
+                                        <div>
+                                            <div className="font-bold text-tea-800 text-sm">{u.nickname} <span className="text-tea-300 font-normal">@{u.username}</span></div>
+                                            <div className="text-xs text-tea-400">注册于 {new Date(Number(u.created_at)).toLocaleDateString()}</div>
                                         </div>
-                                        {config?.hasServerDb ? <span className="text-xs text-green-600 font-bold bg-green-50 px-2 py-0.5 rounded">已连接</span> : <span className="text-xs text-amber-500 font-bold bg-amber-50 px-2 py-0.5 rounded">未配置</span>}
+                                        {u.role !== 'admin' && (
+                                            <button onClick={()=>handleDeleteUser(u.id)} className="text-tea-300 hover:text-red-500 p-2"><Trash2 size={16}/></button>
+                                        )}
                                     </div>
-                                    <div className="p-3 border border-tea-100 rounded-lg flex items-center justify-between">
-                                        <div className="flex items-center gap-2 text-sm text-tea-600">
-                                            <Cloud size={16}/> <span>图床 API</span>
-                                        </div>
-                                        {config?.imageApiUrl ? <span className="text-xs text-green-600 font-bold bg-green-50 px-2 py-0.5 rounded">自定义</span> : <span className="text-xs text-tea-400 font-bold bg-tea-50 px-2 py-0.5 rounded">默认</span>}
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {activeTab === 'SYSTEM' && (
+                        <div className="space-y-4">
+                             <div className="space-y-2">
+                                <h4 className="font-bold text-xs text-tea-500 uppercase tracking-wider">服务连接状态</h4>
+                                <div className="flex items-center justify-between p-3 bg-white border border-tea-100 rounded-lg">
+                                    <div className="flex items-center gap-3">
+                                        <Database size={18} className={config?.hasServerDb ? "text-green-500" : "text-red-500"}/>
+                                        <div className="text-sm font-medium text-tea-700">PostgreSQL 数据库</div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        {config?.hasServerDb ? <span className="text-xs text-green-600 bg-green-50 px-2 py-1 rounded">已连接</span> : <span className="text-xs text-red-600 bg-red-50 px-2 py-1 rounded">未配置</span>}
+                                        <button onClick={onDbError} className="text-xs text-accent hover:underline">初始化</button>
                                     </div>
                                 </div>
-                                <p className="text-[10px] text-tea-300 mt-2 text-center">Version 1.2.0 • Tea Collection</p>
+                                <div className="flex items-center justify-between p-3 bg-white border border-tea-100 rounded-lg">
+                                    <div className="flex items-center gap-3">
+                                        <Cloud size={18} className={config?.imageApiUrl ? "text-green-500" : "text-tea-300"}/>
+                                        <div className="text-sm font-medium text-tea-700">图床服务</div>
+                                    </div>
+                                    {config?.imageApiUrl ? <span className="text-xs text-green-600 bg-green-50 px-2 py-1 rounded">已配置</span> : <span className="text-xs text-tea-400 bg-tea-50 px-2 py-1 rounded">本地存储 (未配置)</span>}
+                                </div>
                             </div>
+
+                             <div className="bg-amber-50 p-4 rounded-xl border border-amber-100 text-xs text-amber-800 leading-relaxed">
+                                 <h4 className="font-bold mb-1 flex items-center gap-1"><AlertTriangle size={14}/> 注意事项</h4>
+                                 若数据库连接显示“未配置”，请检查 Vercel 环境变量 <code className="bg-amber-100 px-1 rounded">DATABASE_URL</code>。
+                                 若图床显示“本地存储”，图片将以 Base64 形式存入数据库，可能导致数据库体积迅速膨胀，建议配置 <code className="bg-amber-100 px-1 rounded">NEXT_PUBLIC_IMAGE_API_URL</code>。
+                             </div>
                         </div>
                     )}
                 </div>
@@ -1118,155 +1366,106 @@ const SettingsModal = ({ isOpen, onClose, user, setUser, onLogout, onChangePassw
     );
 };
 
-const UserManagement = ({ onDbError }: any) => {
-    const [users, setUsers] = useState<any[]>([]);
-    const [newUser, setNewUser] = useState({username: '', password: '', nickname: ''});
-    const [editId, setEditId] = useState<string|null>(null);
-    const [editNick, setEditNick] = useState('');
+const ChangePasswordModal = ({ isOpen, onClose, onSuccess, forced }: any) => {
+    const [password, setPassword] = useState('');
+    const [confirmPass, setConfirmPass] = useState('');
+    const [loading, setLoading] = useState(false);
 
-    const loadUsers = async () => {
-        const res = await authFetch('/api/auth?action=list_users');
-        const json = await res.json();
-        if(res.ok) setUsers(json.data);
-    };
-    useEffect(() => { loadUsers(); }, []);
-
-    const addUser = async (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        const res = await authFetch('/api/auth?action=create_user', { method: 'POST', body: JSON.stringify(newUser) });
-        if(res.ok) { setNewUser({username:'', password:'', nickname: ''}); loadUsers(); }
-        else alert('失败');
+        if (password !== confirmPass) return alert('两次密码不一致');
+        if (password.length < 4) return alert('密码太短');
+        
+        setLoading(true);
+        try {
+            const res = await authFetch('/api/auth?action=change_password', {
+                method: 'POST',
+                body: JSON.stringify({ newPassword: password })
+            });
+            if (res.ok) {
+                alert('密码修改成功');
+                onSuccess();
+            } else {
+                alert('修改失败');
+            }
+        } finally {
+            setLoading(false);
+        }
     };
 
-    const deleteUser = async (id: string) => {
-        if(!confirm('确定删除该用户吗？')) return;
-        const res = await authFetch('/api/auth?action=delete_user', { method: 'POST', body: JSON.stringify({id}) });
-        if(res.ok) loadUsers();
-    };
-
-    const startEdit = (u: any) => { setEditId(u.id); setEditNick(u.nickname); };
-    const cancelEdit = () => { setEditId(null); setEditNick(''); };
-    
-    const saveEdit = async (id: string) => {
-        if (!editNick.trim()) return;
-        const res = await authFetch('/api/auth?action=admin_update_user', { method: 'POST', body: JSON.stringify({id, nickname: editNick}) });
-        if(res.ok) { loadUsers(); cancelEdit(); }
-        else alert('更新失败');
-    };
+    if (!isOpen) return null;
 
     return (
-        <div className="space-y-6">
-            <div className="bg-tea-50 p-4 rounded-lg border border-tea-100">
-                <h4 className="font-bold text-sm mb-3 flex items-center gap-2"><Plus size={16}/> 新增用户</h4>
-                <form onSubmit={addUser} className="flex flex-col gap-2">
-                    <div className="flex gap-2">
-                        <input className="flex-1 px-3 py-2 rounded border border-tea-200 text-sm" placeholder="用户名" value={newUser.username} onChange={e=>setNewUser({...newUser, username:e.target.value})} required />
-                        <input className="flex-1 px-3 py-2 rounded border border-tea-200 text-sm" placeholder="初始密码" value={newUser.password} onChange={e=>setNewUser({...newUser, password:e.target.value})} required />
-                    </div>
-                    <div className="flex gap-2">
-                         <input className="flex-1 px-3 py-2 rounded border border-tea-200 text-sm" placeholder="昵称 (选填)" value={newUser.nickname} onChange={e=>setNewUser({...newUser, nickname:e.target.value})} />
-                         <Button type="submit" size="sm" className="whitespace-nowrap">添加</Button>
-                    </div>
-                </form>
-            </div>
-            <div className="space-y-2">
-                {users.map(u => (
-                    <div key={u.id} className="flex items-center justify-between p-3 bg-white border border-tea-100 rounded-lg shadow-sm">
-                        <div className="flex items-center gap-3">
-                            <div className={`w-8 h-8 rounded-full flex items-center justify-center ${u.role==='admin'?'bg-accent text-white':'bg-tea-200 text-tea-600'}`}><User size={16}/></div>
-                            <div>
-                                <div className="font-bold text-sm text-tea-900 flex items-center gap-2">
-                                    {u.username} 
-                                    {editId === u.id ? (
-                                        <div className="flex items-center gap-1 animate-in fade-in zoom-in duration-200">
-                                            <input className="w-20 px-1 py-0.5 text-xs border rounded bg-white" value={editNick} onChange={e=>setEditNick(e.target.value)} autoFocus />
-                                            <button onClick={()=>saveEdit(u.id)} className="text-green-600 hover:bg-green-50 p-0.5 rounded"><CheckCircle2 size={14}/></button>
-                                            <button onClick={cancelEdit} className="text-red-400 hover:bg-red-50 p-0.5 rounded"><X size={14}/></button>
-                                        </div>
-                                    ) : (
-                                        <span className="font-normal text-tea-500 cursor-pointer hover:text-accent flex items-center gap-1" onClick={()=>startEdit(u)}>
-                                            ({u.nickname}) <Edit2 size={10} className="opacity-0 group-hover:opacity-100 transition-opacity"/>
-                                        </span>
-                                    )}
-                                </div>
-                                <div className="text-xs text-tea-400">{u.role}</div>
-                            </div>
-                        </div>
-                        {u.role !== 'admin' && <button onClick={()=>deleteUser(u.id)} className="text-red-500"><Trash2 size={16}/></button>}
-                    </div>
-                ))}
-            </div>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-stone-900/60 backdrop-blur-sm">
+             <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
+                 <div className="text-center mb-6">
+                     <div className="w-12 h-12 bg-accent/10 text-accent rounded-full flex items-center justify-center mx-auto mb-3">
+                         <Lock size={24}/>
+                     </div>
+                     <h3 className="text-lg font-bold text-tea-900">{forced ? '请修改初始密码' : '修改密码'}</h3>
+                     {forced && <p className="text-xs text-red-500 mt-1">为了安全，首次登录必须修改密码</p>}
+                 </div>
+                 <form onSubmit={handleSubmit} className="space-y-4">
+                     <Input label="新密码" type="password" value={password} onChange={(e:any)=>setPassword(e.target.value)} required/>
+                     <Input label="确认新密码" type="password" value={confirmPass} onChange={(e:any)=>setConfirmPass(e.target.value)} required/>
+                     <div className="flex gap-2 pt-2">
+                         {!forced && <Button variant="secondary" className="flex-1" onClick={onClose} type="button">取消</Button>}
+                         <Button className="flex-1" type="submit" disabled={loading}>{loading ? <Loader2 className="animate-spin"/> : '确认修改'}</Button>
+                     </div>
+                 </form>
+             </div>
         </div>
     );
 };
 
 const DbInitModal = ({ isOpen, onClose }: any) => {
-    const [status, setStatus] = useState<'IDLE'|'LOADING'|'SUCCESS'|'ERROR'>('IDLE');
-    const [msg, setMsg] = useState('');
+    const [status, setStatus] = useState<'IDLE' | 'LOADING' | 'SUCCESS' | 'ERROR'>('IDLE');
+    const [logs, setLogs] = useState<string[]>([]);
 
-    const handleMigrate = async () => {
+    const addLog = (msg: string) => setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]);
+
+    const startInit = async () => {
         setStatus('LOADING');
+        setLogs([]);
+        addLog('开始连接数据库...');
         try {
             const res = await fetch('/api/migrate', { method: 'POST' });
+            const json = await res.json();
+            
             if (res.ok) {
+                addLog('Schema 初始化成功');
+                addLog('正在验证...');
                 setStatus('SUCCESS');
-                setTimeout(() => window.location.reload(), 2000);
             } else {
-                const d = await res.json();
-                setStatus('ERROR');
-                setMsg(d.details || d.error);
+                throw new Error(json.details || json.error);
             }
         } catch (e: any) {
-             setStatus('ERROR');
-             setMsg(e.message);
+            addLog(`错误: ${e.message}`);
+            setStatus('ERROR');
         }
     };
+
     if (!isOpen) return null;
+
     return (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-stone-900/60 backdrop-blur-sm" onClick={onClose} />
-            <div className="bg-white rounded-xl w-full max-w-lg p-6 relative shadow-2xl">
-                 <h3 className="font-bold text-xl mb-4 text-tea-900 flex items-center gap-2"><Database className="text-accent"/> 初始化数据库</h3>
-                 <p className="text-sm text-tea-500 mb-6">检测到数据库结构异常。点击下方按钮尝试自动修复。</p>
-                 {status === 'ERROR' && <div className="bg-red-50 text-red-600 p-3 rounded mb-4 text-xs break-all">{msg}</div>}
-                 {status === 'SUCCESS' && <div className="bg-green-50 text-green-600 p-3 rounded mb-4 text-xs flex items-center gap-2"><CheckCircle2 size={14}/> 成功！即将刷新...</div>}
-                 <Button onClick={handleMigrate} disabled={status==='LOADING' || status==='SUCCESS'} className="w-full h-12">
-                     {status==='LOADING' ? <Loader2 className="animate-spin"/> : '立即修复'}
-                 </Button>
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+            <div className="bg-white rounded-xl w-full max-w-md p-6 shadow-2xl border border-tea-200">
+                <h3 className="text-lg font-bold text-tea-900 mb-4 flex items-center gap-2">
+                    <Database size={20} className="text-accent"/> 数据库初始化
+                </h3>
+                
+                <div className="bg-slate-900 rounded-lg p-4 mb-4 h-48 overflow-y-auto font-mono text-xs text-green-400">
+                    {logs.length === 0 ? <span className="text-slate-500">// 等待开始...</span> : logs.map((l, i) => <div key={i}>{l}</div>)}
+                </div>
+
+                <div className="flex justify-end gap-2">
+                    <Button variant="secondary" onClick={onClose}>关闭</Button>
+                    <Button onClick={startInit} disabled={status === 'LOADING' || status === 'SUCCESS'}>
+                        {status === 'LOADING' ? <Loader2 className="animate-spin"/> : status === 'SUCCESS' ? <CheckCircle2/> : '开始初始化'}
+                    </Button>
+                </div>
+                {status === 'SUCCESS' && <p className="text-center text-xs text-green-600 mt-2">初始化完成，请刷新页面重试。</p>}
             </div>
         </div>
     );
 };
-
-const ChangePasswordModal = ({ isOpen, onClose, forced, onSuccess }: any) => {
-    const [pass, setPass] = useState('');
-    const handleSubmit = async (e: any) => {
-        e.preventDefault();
-        const res = await authFetch('/api/auth?action=change_password', { method: 'POST', body: JSON.stringify({ newPassword: pass }) });
-        if(res.ok) { 
-            alert('修改成功'); 
-            if (onSuccess) onSuccess(); 
-            else onClose(); 
-            // Previous version used reload here, which caused an infinite loop due to stale localStorage
-        }
-    };
-    if(!isOpen) return null;
-    return (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-            <div className="bg-white rounded-xl p-6 w-full max-w-sm shadow-2xl">
-                <h3 className="text-xl font-bold mb-4 flex items-center gap-2"><Lock className="text-accent"/> 修改密码</h3>
-                {forced && <p className="text-xs text-amber-600 bg-amber-50 p-2 rounded mb-4">为了安全起见，初始登录请修改默认密码。</p>}
-                <form onSubmit={handleSubmit}>
-                    <Input label="新密码" type="password" value={pass} onChange={(e:any)=>setPass(e.target.value)} required minLength={4} />
-                    <div className="flex justify-end gap-2 mt-4">
-                        {!forced && <Button variant="secondary" onClick={onClose}>取消</Button>}
-                        <Button type="submit">确认</Button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    );
-};
-
-const root = createRoot(document.getElementById('root')!);
-root.render(<App />);
