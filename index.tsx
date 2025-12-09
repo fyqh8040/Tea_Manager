@@ -869,13 +869,14 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, onStockUpdate, con
                 const formData = new FormData();
                 formData.append('file', file);
                 
-                // 兼容不同的图床参数命名习惯，强制指定上传目录为 tea_image
+                // 兼容不同的图床参数命名习惯 (保留Body参数以防万一，但主要依赖Query参数)
                 formData.append('folder', 'tea_image'); 
                 formData.append('path', 'tea_image');
                 formData.append('uploadPath', 'tea_image'); 
 
-                // 核心修改：请求本地代理接口，而不是直接请求外部 URL，解决 CORS 问题
-                const res = await fetch('/api/upload', {
+                // 核心修改：请求本地代理接口，并将 uploadFolder 拼接到 URL Query 中
+                // 这样 api/upload.js 才能通过 req.query 获取并转发给上游
+                const res = await fetch('/api/upload?uploadFolder=tea_image', {
                     method: 'POST',
                     body: formData
                 });
