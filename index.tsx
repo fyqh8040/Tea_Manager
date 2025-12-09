@@ -862,7 +862,7 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, onStockUpdate, con
         const file = e.target.files?.[0];
         if (!file) return;
 
-        // 优先尝试图床上传
+        // 优先尝试图床上传 (检查配置是否存在，但实际请求走代理)
         if (config?.imageApiUrl) {
             setIsUploading(true);
             try {
@@ -870,24 +870,16 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, onStockUpdate, con
                 formData.append('file', file);
                 formData.append('folder', 'tea_image'); // 用户指定文件夹
 
-                // 处理 API URL，确保以 /upload 结尾 (如果是根域名)
-                let apiUrl = config.imageApiUrl.replace(/\/$/, '');
-                if (!apiUrl.endsWith('/upload')) {
-                    apiUrl += '/upload';
-                }
-
-                const headers: any = {};
-                if (config.imageApiToken) {
-                    headers['Authorization'] = `Bearer ${config.imageApiToken}`;
-                }
-
-                const res = await fetch(apiUrl, {
+                // 核心修改：请求本地代理接口，而不是直接请求外部 URL，解决 CORS 问题
+                const res = await fetch('/api/upload', {
                     method: 'POST',
-                    headers: headers,
                     body: formData
                 });
 
-                if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
+                if (!res.ok) {
+                    const errorText = await res.text();
+                    throw new Error(errorText || `Upload failed: ${res.status}`);
+                }
                 
                 const data = await res.json();
                 let remoteUrl = '';
@@ -899,7 +891,7 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, onStockUpdate, con
                     if (src.startsWith('http')) remoteUrl = src;
                     else {
                         // 如果是相对路径，拼接到图床域名 (去掉 /upload 后缀的 BaseUrl)
-                        const baseUrl = apiUrl.replace(/\/upload\/?$/, '');
+                        const baseUrl = config.imageApiUrl.replace(/\/upload\/?$/, '').replace(/\/$/, '');
                         remoteUrl = `${baseUrl}${src}`;
                     }
                 } else if (data.url) {
