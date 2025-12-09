@@ -396,8 +396,6 @@ const App = () => {
   };
 
   const handlePasswordUpdated = () => {
-    // 关键修复：更新本地状态和缓存，而不是刷新页面
-    // 刷新页面会导致再次读取旧的 localStorage (is_initial=true)，从而死循环
     if (user) {
         const updatedUser = { ...user, is_initial: false };
         setUser(updatedUser);
@@ -724,7 +722,7 @@ const App = () => {
           onSave={handleSave}
           onDelete={handleDelete}
           onStockUpdate={handleStockUpdate}
-          config={serverConfig} // <-- Pass config here
+          config={serverConfig}
         />
       )}
 
@@ -1469,3 +1467,6 @@ const DbInitModal = ({ isOpen, onClose }: any) => {
         </div>
     );
 };
+
+const root = createRoot(document.getElementById('root')!);
+root.render(<App />);
