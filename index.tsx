@@ -868,7 +868,11 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, onStockUpdate, con
             try {
                 const formData = new FormData();
                 formData.append('file', file);
-                formData.append('folder', 'tea_image'); // 用户指定文件夹
+                
+                // 兼容不同的图床参数命名习惯，强制指定上传目录为 tea_image
+                formData.append('folder', 'tea_image'); 
+                formData.append('path', 'tea_image');
+                formData.append('uploadPath', 'tea_image'); 
 
                 // 核心修改：请求本地代理接口，而不是直接请求外部 URL，解决 CORS 问题
                 const res = await fetch('/api/upload', {
@@ -892,7 +896,8 @@ const ItemModal = ({ isOpen, onClose, item, onSave, onDelete, onStockUpdate, con
                     else {
                         // 如果是相对路径，拼接到图床域名 (去掉 /upload 后缀的 BaseUrl)
                         const baseUrl = config.imageApiUrl.replace(/\/upload\/?$/, '').replace(/\/$/, '');
-                        remoteUrl = `${baseUrl}${src}`;
+                        // 确保路径拼接正确
+                        remoteUrl = `${baseUrl}/${src.replace(/^\//, '')}`;
                     }
                 } else if (data.url) {
                     remoteUrl = data.url;
