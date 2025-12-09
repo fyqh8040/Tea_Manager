@@ -396,6 +396,17 @@ const App = () => {
       setItems([]);
   };
 
+  const handlePasswordUpdated = () => {
+    // 关键修复：更新本地状态和缓存，而不是刷新页面
+    // 刷新页面会导致再次读取旧的 localStorage (is_initial=true)，从而死循环
+    if (user) {
+        const updatedUser = { ...user, is_initial: false };
+        setUser(updatedUser);
+        localStorage.setItem('tea_user', JSON.stringify(updatedUser));
+    }
+    setIsPasswordModalOpen(false);
+  };
+
   const handleSave = async (item: Partial<TeaItem>) => {
     const itemData = {
       name: item.name,
@@ -736,6 +747,7 @@ const App = () => {
           <ChangePasswordModal 
             isOpen={isPasswordModalOpen}
             onClose={() => setIsPasswordModalOpen(false)}
+            onSuccess={handlePasswordUpdated}
             forced={user?.is_initial}
           />
       )}
@@ -1202,21 +1214,30 @@ const DbInitModal = ({ isOpen, onClose }: any) => {
     );
 };
 
-const ChangePasswordModal = ({ isOpen, onClose, forced }: any) => {
+const ChangePasswordModal = ({ isOpen, onClose, forced, onSuccess }: any) => {
     const [pass, setPass] = useState('');
     const handleSubmit = async (e: any) => {
         e.preventDefault();
         const res = await authFetch('/api/auth?action=change_password', { method: 'POST', body: JSON.stringify({ newPassword: pass }) });
-        if(res.ok) { alert('成功'); onClose(); if(forced) window.location.reload(); }
+        if(res.ok) { 
+            alert('修改成功'); 
+            if (onSuccess) onSuccess(); 
+            else onClose(); 
+            // Previous version used reload here, which caused an infinite loop due to stale localStorage
+        }
     };
     if(!isOpen) return null;
     return (
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
             <div className="bg-white rounded-xl p-6 w-full max-w-sm shadow-2xl">
                 <h3 className="text-xl font-bold mb-4 flex items-center gap-2"><Lock className="text-accent"/> 修改密码</h3>
+                {forced && <p className="text-xs text-amber-600 bg-amber-50 p-2 rounded mb-4">为了安全起见，初始登录请修改默认密码。</p>}
                 <form onSubmit={handleSubmit}>
                     <Input label="新密码" type="password" value={pass} onChange={(e:any)=>setPass(e.target.value)} required minLength={4} />
-                    <div className="flex justify-end gap-2 mt-4"><Button type="submit">确认</Button></div>
+                    <div className="flex justify-end gap-2 mt-4">
+                        {!forced && <Button variant="secondary" onClick={onClose}>取消</Button>}
+                        <Button type="submit">确认</Button>
+                    </div>
                 </form>
             </div>
         </div>
