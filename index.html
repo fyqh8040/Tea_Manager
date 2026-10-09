@@ -5,6 +5,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>茶韵典藏 | Tea Collection</title>
+  <meta name="description" content="茶韵典藏 - 专为茶友与藏家打造的现代化在线茶叶与茶器资产管理系统。支持双模式分类、库存流水记录、智能联想、资产核算与多用户权限管理。">
+  <meta property="og:title" content="茶韵典藏 | Tea Collection">
+  <meta property="og:description" content="茶韵典藏 - 专为茶友与藏家打造的现代化在线茶叶与茶器资产管理系统。支持双模式分类、库存流水记录、智能联想、资产核算与多用户权限管理。">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   
   <!-- Tailwind CSS -->
@@ -66,6 +69,27 @@
     .no-scrollbar {
       -ms-overflow-style: none;
       scrollbar-width: none;
+    }
+    /* Elegant Custom Scrollbar for Modal Panels */
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: rgba(0, 0, 0, 0.03);
+      border-radius: 9999px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: rgba(74, 124, 111, 0.35);
+      border-radius: 9999px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: rgba(74, 124, 111, 0.6);
+    }
+    .custom-scrollbar {
+      scrollbar-width: thin;
+      scrollbar-color: rgba(74, 124, 111, 0.35) transparent;
+      overscroll-behavior: contain;
     }
   </style>
 <script type="importmap">

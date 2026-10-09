@@ -1,5 +1,5 @@
 
-import { Pool } from 'pg';
+import { getPool } from './db.js';
 import { SCHEMA_SQL } from '../db/schema_definition.js';
 
 export default async function handler(req, res) {
@@ -7,23 +7,9 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  // 1. 检查环境变量
-  const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) {
-    return res.status(500).json({ 
-      error: 'Missing DATABASE_URL', 
-      details: '请在 Vercel 环境变量中配置 DATABASE_URL (格式: postgres://user:pass@host:port/db)' 
-    });
-  }
-
   let client;
   try {
-    // 2. 连接数据库
-    const pool = new Pool({
-      connectionString,
-      ssl: { rejectUnauthorized: false } 
-    });
-    
+    const pool = getPool();
     client = await pool.connect();
 
     // 3. 执行 SQL (拆分语句逐条执行，提高稳定性)

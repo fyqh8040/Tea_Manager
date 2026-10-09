@@ -1,18 +1,9 @@
 
-import { Pool } from 'pg';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { getPool } from './db.js';
 
-let pool;
 const JWT_SECRET = process.env.JWT_SECRET || 'tea-collection-secret-key-change-in-prod';
-
-function getPool() {
-  if (!pool) {
-    if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL not configured');
-    pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
-  }
-  return pool;
-}
 
 // 验证 Token 中间件逻辑 (Helper)
 export const verifyToken = (token) => {

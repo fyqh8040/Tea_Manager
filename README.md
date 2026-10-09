@@ -38,65 +38,35 @@
 
 ## 🚀 部署指南
 
-本项目推荐使用 **Vercel** 配合 **Supabase** 进行免费部署。
+本项目推荐使用 **Vercel** 及其内置的 **Neon Serverless PostgreSQL (免费版)** 进行极简免运维部署。
 
-### 核心概念：为什么需要 Connection String？
+### 第一步：在 Vercel 中一键绑定 Neon 数据库
 
-Supabase 提供两种连接方式。本项目利用后端直连能力实现了**自动建表**，因此强烈推荐配置 `DATABASE_URL`：
-*   **Connection String (DATABASE_URL)**：后端直连数据库。**优点**是本项目可以通过代码**自动检测并创建数据表**，真正实现“零门槛部署”。
+1. 登录 [Vercel](https://vercel.com)，进入本项目控制台。
+2. 点击顶部导航栏的 **Storage**。
+3. 点击 **Create Storage**，选择 **Neon (PostgreSQL)**。
+4. 创建完成后，Vercel 会自动为项目注入环境变量（包括 `POSTGRES_URL`、`DATABASE_URL`、`PGHOST` 等）。
+5. **注意**：如果环境变量右侧显示黄色的 **`Needs Attention`** 标识，代表需要进行一次 **Redeploy（重新部署）** 使得新绑定的数据库变量生效。
 
-### 第一步：准备数据库 (Supabase)
+### 第二步：配置环境变量
 
-1.  注册并登录 [Supabase](https://supabase.com)。
-2.  创建一个新项目 (New Project)。
-3.  进入 **Project Settings** -> **Database**。
-4.  找到 **Connection String** -> **URI**。
-5.  **重要**：复制 Mode 为 `Transaction` (端口 6543) 的连接字符串。
-    *   格式示例：`postgres://postgres.[ref]:[password]@aws-0-region.pooler.supabase.com:6543/postgres`
-    *   *记得将 `[password]` 替换为你创建项目时设置的数据库密码。*
+在 **Project Settings** -> **Environment Variables** 中核对以下变量：
 
-### 第二步：部署代码 (Vercel)
+| 变量名 | 必填 | 说明 |
+| :--- | :---: | :--- |
+| `POSTGRES_URL` / `DATABASE_URL` | ✅ | **核心配置 (Neon 自动注入)**：PostgreSQL 连接字符串。代码已支持自动智能识别。 |
+| `JWT_SECRET` | ✅ | **安全配置**：Token 加密密钥。生产环境请务必设置。 |
+| `NEXT_PUBLIC_IMAGE_API_URL` | 可选 | 图床上传接口地址 (例如：`https://cfbed.xxx.xyz/`) |
+| `NEXT_PUBLIC_IMAGE_API_TOKEN` | 可选 | 图床上传 Token |
 
-1.  Fork 本项目到你的 GitHub 仓库。
-2.  登录 [Vercel](https://vercel.com)，点击 **Add New...** -> **Project**。
-3.  导入你刚刚 Fork 的仓库。
-4.  **关键步骤**：在 **Environment Variables** (环境变量) 中添加以下变量：
+### 第三步：一键初始化数据库
 
-#### 基础配置 (必须)
-
-| 变量名 | 必填 | 说明 | 示例值 |
-| :--- | :---: | :--- | :--- |
-| `DATABASE_URL` | ✅ | **核心配置 (后端)**：PostgreSQL 连接字符串。用于后端 API 直连数据库。 | `postgres://postgres:[PWD]@db.xxx.supabase.co:6543/postgres` |
-| `JWT_SECRET` | ✅ | **安全配置**：Token 加密密钥。**生产环境请务必设置**。 | `my-super-secret-key-123456` |
-
-#### Supabase SDK 配置 (可选 - 推荐)
-
-虽然核心功能使用后端直连，但配置以下参数可消除前端控制台警告，并为未来扩展（如使用 Supabase Storage 存储图片）做准备。
-
-| 变量名 | 说明 | 示例值 |
-| :--- | :--- | :--- |
-| `NEXT_PUBLIC_SUPABASE_URL` | Supabase 项目 API 地址 (Project Settings -> API) | `https://your-project.supabase.co` |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase 项目匿名公钥 (Project Settings -> API) | `eyJxh...` |
-
-#### 图床配置 (可选 - 推荐 CloudFlare-ImgBed)
-
-如果不配置以下参数，图片将以 Base64 格式直接存入数据库（适合轻量使用）。如需对接 [CloudFlare-ImgBed](https://github.com/MarSeventh/CloudFlare-ImgBed) 等图床以获得更好的性能：
-
-| 变量名 | 说明 | 示例值 |
-| :--- | :--- | :--- |
-| `NEXT_PUBLIC_IMAGE_API_URL` | 图床上传接口地址 | `https://your-cf-worker.workers.dev/upload` |
-| `NEXT_PUBLIC_IMAGE_API_TOKEN` | 图床上传 Token | `your-token-here` |
-
-5.  点击 **Deploy** 等待部署完成。
-
-### 第三步：一键初始化
-
-1.  打开部署好的网站域名。
-2.  **首次登录**：使用默认管理员账号。
-    *   用户名: `admin`
-    *   密码: `admin`
-3.  登录后，系统会自动检测数据库结构。若弹出 **红色警告“数据库未初始化”**，请点击 **“打开初始化向导”** -> **“立即修复”**。
-4.  系统将自动创建所有数据表。页面刷新后，部署完成！
+1. 打开部署好的网站域名。
+2. **首次登录**：使用默认管理员账号。
+   * 用户名: `admin`
+   * 密码: `admin`
+3. 登录后，若弹出 **“数据库尚未初始化”** 提示，点击 **“打开初始化向导”** -> **“开始初始化 / 修复”**。
+4. 系统将自动在 Neon 数据库中执行建表与迁移。完成后刷新页面即可开始使用！
 
 ---
 

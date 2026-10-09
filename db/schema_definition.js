@@ -49,6 +49,18 @@ alter table public.tea_items add column if not exists unit text default '件';
 alter table public.tea_items add column if not exists price numeric default 0; 
 alter table public.tea_items add column if not exists unit_price numeric default 0;
 
+-- 补丁: 业务扩展字段 (茶道与器物专业属性)
+alter table public.tea_items add column if not exists material text;
+alter table public.tea_items add column if not exists capacity_ml numeric;
+alter table public.tea_items add column if not exists pore_type text;
+alter table public.tea_items add column if not exists paired_tea text;
+alter table public.tea_items add column if not exists storage_location text;
+alter table public.tea_items add column if not exists tags text;
+alter table public.tea_items add column if not exists flavor_profile jsonb;
+alter table public.tea_items add column if not exists brewing_guide jsonb;
+alter table public.tea_items add column if not exists rating numeric default 5;
+alter table public.tea_items add column if not exists low_stock_threshold numeric;
+
 alter table public.tea_items alter column quantity type numeric;
 alter table public.tea_items alter column price type numeric;
 alter table public.tea_items alter column unit_price type numeric;
@@ -79,4 +91,24 @@ alter table public.inventory_logs alter column current_balance type numeric;
 alter table public.inventory_logs enable row level security;
 drop policy if exists "Public Access Inventory Logs" on public.inventory_logs;
 create policy "Public Access Inventory Logs" on public.inventory_logs for all using (true);
+
+-- 5. 创建茶席品饮笔记表
+create table if not exists public.tasting_notes (
+  id uuid default gen_random_uuid() primary key,
+  item_id uuid references public.tea_items(id) on delete cascade,
+  user_id uuid references public.users(id) on delete cascade,
+  rating numeric default 5,
+  water_temp numeric,
+  steep_seconds numeric,
+  tea_amount numeric,
+  ware_name text,
+  soup_color text,
+  flavor_tags text,
+  notes text,
+  created_at bigint default (extract(epoch from now()) * 1000)::bigint
+);
+
+alter table public.tasting_notes enable row level security;
+drop policy if exists "Public Access Tasting Notes" on public.tasting_notes;
+create policy "Public Access Tasting Notes" on public.tasting_notes for all using (true);
 `;
