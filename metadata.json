@@ -2,5 +2,7 @@
   "description": "茶韵典藏 - 专为茶友与藏家打造的现代化在线茶叶与茶器资产管理系统。支持双模式分类、库存流水记录、智能联想、资产核算与多用户权限管理。",
   "requestFramePermissions": [],
   "name": "茶韵典藏",
-  "majorCapabilities": []
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

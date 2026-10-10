@@ -1,9 +1,10 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { Download, Sparkles, X, Share2, Check } from 'lucide-react';
+import { Download, Sparkles, X, Share2, Check, Printer, Loader2, Image as ImageIcon } from 'lucide-react';
+import { toPng } from 'html-to-image';
 import { TeaItem } from '../../types/tea';
 import { FlavorRadar } from './FlavorRadar';
 import { Button } from '../ui/Button';
-import { formatCurrency, formatDate } from '../../utils/formatters';
+import { formatDate } from '../../utils/formatters';
 
 export interface TeaCardPosterModalProps {
   isOpen: boolean;
@@ -18,6 +19,8 @@ export const TeaCardPosterModal: React.FC<TeaCardPosterModalProps> = ({
 }) => {
   const cardRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
+  const [isExportingImage, setIsExportingImage] = useState(false);
+  const [statusMsg, setStatusMsg] = useState<string | null>(null);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -37,6 +40,7 @@ export const TeaCardPosterModal: React.FC<TeaCardPosterModalProps> = ({
 
   const isTea = item.type === 'TEA';
 
+  // 1. 复制雅签文本
   const handleCopyText = () => {
     const text = `🍃 【茶韵典藏 · 鉴赏签】
 品名：${item.name}
@@ -49,6 +53,51 @@ ${item.description ? `心得：${item.description}\n` : ''}—— 录自 茶韵�
     navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  // 2. 高清保存为雅签图片 (PNG)
+  const handleSaveAsImage = async () => {
+    if (!cardRef.current || isExportingImage) return;
+    setIsExportingImage(true);
+    setStatusMsg('正在生成高清鉴赏雅签图片...');
+
+    try {
+      // 避免外部跨域字体样式表解析导致 SecurityError，设置 skipFonts: true 和 fontEmbedCSS: ''
+      const dataUrl = await toPng(cardRef.current, {
+        cacheBust: true,
+        pixelRatio: 2, // 2x 高清Retina画质
+        backgroundColor: '#fdfbf7',
+        skipFonts: true,
+        fontEmbedCSS: '',
+        imagePlaceholder:
+          'data:image/svg+xml;charset=utf-8,%3Csvg xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22 viewBox%3D%220 0 100 100%22%3E%3Crect fill%3D%22%23f3f4f6%22 width%3D%22100%22 height%3D%22100%22%2F%3E%3C%2Fsvg%3E',
+      });
+
+      const link = document.createElement('a');
+      const cleanName = item.name.replace(/[\\/:*?"<>|]/g, '_');
+      link.download = `茶韵雅签_${cleanName}.png`;
+      link.href = dataUrl;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setStatusMsg('图片保存成功！');
+      setTimeout(() => setStatusMsg(null), 2500);
+    } catch (err: any) {
+      console.error('Failed to export card image:', err);
+      // 备用机制：若跨域外链图片导致跨域污染，尝试直接调用打印
+      setStatusMsg('由于网络图片跨域保护，正在为您唤起系统打印/另存为PDF...');
+      setTimeout(() => {
+        window.print();
+        setStatusMsg(null);
+      }, 800);
+    } finally {
+      setIsExportingImage(false);
+    }
+  };
+
+  // 3. 唤起系统打印 / 保存为 PDF
+  const handlePrint = () => {
+    window.print();
   };
 
   return (
@@ -77,9 +126,18 @@ ${item.description ? `心得：${item.description}\n` : ''}—— 录自 茶韵�
           </button>
         </div>
 
+        {/* Status Toast */}
+        {statusMsg && (
+          <div className="px-4 py-2 bg-accent/10 border-b border-accent/20 text-accent text-xs font-serif text-center flex items-center justify-center gap-2 animate-in fade-in">
+            {isExportingImage && <Loader2 size={13} className="animate-spin" />}
+            {statusMsg}
+          </div>
+        )}
+
         {/* Scrollable Printable Card */}
         <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 flex justify-center custom-scrollbar">
           <div
+            id="printable-tea-card"
             ref={cardRef}
             className="w-full bg-[#fdfbf7] border-2 border-stone-300 rounded-xl p-5 shadow-lg relative overflow-hidden text-stone-800"
             style={{
@@ -127,6 +185,7 @@ ${item.description ? `心得：${item.description}\n` : ''}—— 录自 茶韵�
                   <img
                     src={item.image_url}
                     alt={item.name}
+                    crossOrigin="anonymous"
                     className="w-full h-full object-cover"
                   />
                 </div>
@@ -207,20 +266,38 @@ ${item.description ? `心得：${item.description}\n` : ''}—— 录自 茶韵�
         </div>
 
         {/* Footer Actions */}
-        <div className="px-5 py-3 border-t border-stone-200 bg-white/70 flex justify-end gap-2 shrink-0">
+        <div className="px-5 py-3 border-t border-stone-200 bg-white/70 flex flex-wrap justify-end gap-2 shrink-0">
           <Button variant="secondary" size="sm" onClick={handleCopyText}>
             {copied ? (
               <>
-                <Check size={14} className="text-green-600" /> 已复制文本
+                <Check size={14} className="text-green-600" /> 已复制
               </>
             ) : (
               <>
-                <Share2 size={14} /> 复制文本签
+                <Share2 size={14} /> 复制文本
               </>
             )}
           </Button>
-          <Button size="sm" onClick={() => window.print()}>
-            <Download size={14} /> 打印 / 保存
+
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handleSaveAsImage}
+            disabled={isExportingImage}
+          >
+            {isExportingImage ? (
+              <>
+                <Loader2 size={14} className="animate-spin" /> 生成中...
+              </>
+            ) : (
+              <>
+                <ImageIcon size={14} /> 保存为图片
+              </>
+            )}
+          </Button>
+
+          <Button size="sm" onClick={handlePrint}>
+            <Printer size={14} /> 打印 / PDF
           </Button>
         </div>
       </div>

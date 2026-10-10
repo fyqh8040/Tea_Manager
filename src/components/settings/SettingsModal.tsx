@@ -12,15 +12,18 @@ import {
   Download,
   Upload,
   FileCheck2,
-  AlertCircle
+  AlertCircle,
+  Sparkles
 } from 'lucide-react';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Badge } from '../ui/Badge';
-import { UserProfile, AppConfig } from '../../types/tea';
+import { UserProfile, AppConfig, AiConfig } from '../../types/tea';
 import { authFetch } from '../../utils/api';
 import { formatDate } from '../../utils/formatters';
+import { getAiConfig } from '../../services/aiService';
+import { AiSettingsModal } from '../ai/AiSettingsModal';
 
 export interface SettingsModalProps {
   isOpen: boolean;
@@ -62,6 +65,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [pendingImportItems, setPendingImportItems] = useState<any[] | null>(null);
   const [importFileName, setImportFileName] = useState<string>('');
   const [isImporting, setIsImporting] = useState(false);
+  const [isAiSettingsOpen, setIsAiSettingsOpen] = useState(false);
+  const [aiConfig, setAiConfig] = useState<AiConfig>(() => getAiConfig());
+
+  useEffect(() => {
+    if (isOpen) {
+      setAiConfig(getAiConfig());
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     if (isOpen && user?.role === 'admin' && activeTab === 'USERS') {
@@ -397,6 +408,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
               )}
 
+              <div className="p-3 bg-tea-50/80 rounded-xl border border-tea-100 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded-lg bg-[#3d655a] text-amber-100 flex items-center justify-center">
+                    <Sparkles size={14} />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-tea-800">AI 侍茶顾问引擎</div>
+                    <div className="text-[11px] text-tea-500 font-serif">
+                      {aiConfig.provider === 'builtin'
+                        ? '🍵 内置私房茶学大师 (免Key)'
+                        : aiConfig.provider === 'gemini'
+                        ? '⚡ Google Gemini 2.5'
+                        : '🚀 DeepSeek / 自定义接口'}
+                    </div>
+                  </div>
+                </div>
+                <Button size="sm" variant="outline" onClick={() => setIsAiSettingsOpen(true)}>
+                  引擎设置
+                </Button>
+              </div>
+
               <div className="pt-2 space-y-2">
                 <Button
                   variant="secondary"
@@ -555,6 +587,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <Badge color="tea">内置轻量压缩</Badge>
                 )}
               </div>
+
+              <div className="flex items-center justify-between p-3.5 bg-white border border-tea-100 rounded-xl shadow-sm">
+                <div className="flex items-center gap-3">
+                  <Sparkles size={20} className="text-[#3d655a]" />
+                  <div>
+                    <div className="text-xs font-bold text-tea-800">AI 侍茶与感官分析动力源</div>
+                    <div className="text-[11px] text-tea-400">
+                      {aiConfig.provider === 'builtin'
+                        ? '内置私房茶学专家规则图谱（零成本·免Key）'
+                        : aiConfig.provider === 'gemini'
+                        ? 'Google Gemini 2.5 官方大模型'
+                        : 'DeepSeek / OpenAI 兼容接口'}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge color={aiConfig.provider === 'builtin' ? 'green' : 'accent'}>
+                    {aiConfig.provider === 'builtin' ? '内置免Key' : '大模型直连'}
+                  </Badge>
+                  <Button size="sm" variant="outline" onClick={() => setIsAiSettingsOpen(true)}>
+                    配置
+                  </Button>
+                </div>
+              </div>
             </div>
 
             <div className="bg-amber-50/80 p-4 rounded-xl border border-amber-200/80 text-xs text-amber-900 leading-relaxed">
@@ -571,6 +627,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
         )}
       </div>
+
+      {/* AI Settings Modal */}
+      <AiSettingsModal
+        isOpen={isAiSettingsOpen}
+        onClose={() => setIsAiSettingsOpen(false)}
+        onConfigSaved={(updated) => setAiConfig(updated)}
+      />
     </Modal>
   );
 };

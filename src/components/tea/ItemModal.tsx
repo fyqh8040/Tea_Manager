@@ -20,8 +20,11 @@ import {
   TeaItem,
   InventoryLog,
   AppConfig,
-  ItemType
+  ItemType,
+  VisionExtractionResult
 } from '../../types/tea';
+import { ImageTeaScannerModal } from '../ai/ImageTeaScannerModal';
+import { analyzeSensoryProfile } from '../../services/aiService';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Combobox } from '../ui/Combobox';
@@ -88,7 +91,50 @@ export const ItemModal: React.FC<ItemModalProps> = ({
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [isAnalyzingSensory, setIsAnalyzingSensory] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleApplyExtractedData = (extracted: VisionExtractionResult, rawImageUrl?: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      type: extracted.type || prev.type,
+      name: extracted.name || prev.name,
+      category: extracted.category || prev.category,
+      year: extracted.year || prev.year,
+      origin: extracted.origin || prev.origin,
+      material: extracted.material || prev.material,
+      capacity_ml: extracted.capacity_ml !== undefined ? extracted.capacity_ml : prev.capacity_ml,
+      paired_tea: extracted.paired_tea || prev.paired_tea,
+      description: extracted.description || prev.description,
+      tags: extracted.tags && extracted.tags.length > 0 ? extracted.tags.join(',') : prev.tags,
+      image_url: rawImageUrl || prev.image_url
+    }));
+  };
+
+  const handleAiSensoryProfile = async () => {
+    setIsAnalyzingSensory(true);
+    try {
+      const promptText = formData.description || formData.name || '优质茗茶';
+      const result = await analyzeSensoryProfile(promptText, {
+        name: formData.name,
+        category: formData.category,
+        year: formData.year,
+        origin: formData.origin
+      });
+
+      setFormData((prev) => ({
+        ...prev,
+        flavor_profile: result.flavor_profile || prev.flavor_profile,
+        brewing_guide: result.brewing_guide || prev.brewing_guide,
+        description: prev.description ? prev.description : (result.polished_note || prev.description)
+      }));
+    } catch (err) {
+      console.error('Sensory AI failed:', err);
+    } finally {
+      setIsAnalyzingSensory(false);
+    }
+  };
 
   // Prevent background scrolling and support Escape key
   useEffect(() => {
@@ -371,6 +417,17 @@ export const ItemModal: React.FC<ItemModalProps> = ({
                 </button>
               )}
             </div>
+
+            {/* AI Scan Button */}
+            <button
+              type="button"
+              onClick={() => setIsScannerOpen(true)}
+              className="flex items-center gap-1 px-2.5 py-1 text-xs font-serif text-[#3d655a] bg-emerald-50 hover:bg-emerald-100 border border-emerald-300/70 rounded-lg transition-colors shrink-0 ml-auto"
+              title="拍照或上传藏品图片，AI 自动提取品名年份泥料等信息"
+            >
+              <Sparkles size={13} className="text-amber-600" />
+              <span>AI 识图填单</span>
+            </button>
 
             {/* Universal Close Button (Accessible across all tabs) */}
             <button
@@ -755,6 +812,38 @@ export const ItemModal: React.FC<ItemModalProps> = ({
                   </p>
                 </div>
 
+                {/* AI Sensory & Brewing Recommendation Card */}
+                <div className="bg-emerald-50/70 p-3.5 rounded-xl border border-emerald-200/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-1.5 text-xs font-serif font-bold text-[#3d655a]">
+                      <Sparkles size={14} className="text-amber-600" />
+                      AI 智能感官风味与冲泡推导
+                    </div>
+                    <p className="text-[11px] text-stone-600 font-serif">
+                      基于【{formData.name || '此款茶品'}】({formData.category || '茶类'}, {formData.year ? formData.year + '年' : ''})
+                      深度推演六维风味数值并推荐投茶与水温。
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAiSensoryProfile}
+                    disabled={isAnalyzingSensory}
+                    className="px-3.5 py-1.5 bg-[#3d655a] hover:bg-[#34574d] text-amber-50 rounded-lg text-xs font-serif transition-colors flex items-center gap-1.5 shrink-0 shadow-xs"
+                  >
+                    {isAnalyzingSensory ? (
+                      <>
+                        <Loader2 size={13} className="animate-spin" />
+                        <span>正在推导中...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles size={13} />
+                        <span>一键推算六维雷达</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
                 <div className="bg-white p-5 rounded-2xl border border-tea-100 shadow-xs flex flex-col items-center">
                   <FlavorRadar
                     data={formData.flavor_profile}
@@ -890,6 +979,14 @@ export const ItemModal: React.FC<ItemModalProps> = ({
           </div>
         </div>
       </div>
+
+      {/* AI Multimodal Image Scanner Modal */}
+      <ImageTeaScannerModal
+        isOpen={isScannerOpen}
+        onClose={() => setIsScannerOpen(false)}
+        onApply={handleApplyExtractedData}
+        initialTypeHint={formData.type}
+      />
     </div>
   );
 };

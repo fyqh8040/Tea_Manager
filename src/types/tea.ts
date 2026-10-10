@@ -94,3 +94,45 @@ export interface SystemStats {
   teawareCount: number;
   lowStockCount: number;
 }
+
+// AI 智能功能类型定义
+export interface AiChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: number;
+  isFallback?: boolean;
+}
+
+export interface SensoryAnalysisResult {
+  flavor_profile?: FlavorProfile;
+  brewing_guide?: BrewingGuide;
+  polished_note?: string;
+  suggested_tags?: string[];
+  isFallback?: boolean;
+}
+
+export interface VisionExtractionResult {
+  type?: ItemType;
+  name?: string;
+  category?: string;
+  year?: string;
+  origin?: string;
+  material?: string;
+  capacity_ml?: number;
+  paired_tea?: string;
+  description?: string;
+  tags?: string[];
+  isFallback?: boolean;
+}
+
+export type AiProviderType = 'builtin' | 'gemini' | 'openai_compatible';
+
+export interface AiConfig {
+  provider: AiProviderType;
+  geminiApiKey?: string;
+  geminiModel?: string;
+  customBaseUrl?: string;
+  customApiKey?: string;
+  customModel?: string;
+}

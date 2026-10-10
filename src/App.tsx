@@ -35,6 +35,7 @@ import { TimelineView } from './components/tea/TimelineView';
 import { TeaCardPosterModal } from './components/tea/TeaCardPosterModal';
 import { SettingsModal } from './components/settings/SettingsModal';
 import { DbInitModal } from './components/settings/DbInitModal';
+import { FloatingSommelier } from './components/ai/FloatingSommelier';
 
 export const App: React.FC = () => {
   // Server Config
@@ -537,6 +538,17 @@ export const App: React.FC = () => {
           onClose={() => setIsPasswordModalOpen(false)}
           onSuccess={markPasswordChanged}
           forced={user?.is_initial}
+        />
+      )}
+
+      {/* AI Floating Tea Sommelier */}
+      {user && (
+        <FloatingSommelier
+          items={items}
+          onSelectItem={(selectedItem) => {
+            setEditingItem(selectedItem);
+            setIsItemModalOpen(true);
+          }}
         />
       )}
     </div>

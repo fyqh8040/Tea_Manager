@@ -6,6 +6,7 @@ import { Input } from '../ui/Input';
 import { FLAVOR_TAGS, SOUP_COLORS } from '../../constants/tea';
 import { formatDateTime } from '../../utils/formatters';
 import { authFetch } from '../../utils/api';
+import { analyzeSensoryProfile } from '../../services/aiService';
 
 export interface TastingNotesManagerProps {
   item: TeaItem;
@@ -34,6 +35,29 @@ export const TastingNotesManager: React.FC<TastingNotesManagerProps> = ({ item }
   const [soupColor, setSoupColor] = useState('');
   const [flavorTags, setFlavorTags] = useState<string[]>([]);
   const [content, setContent] = useState('');
+  const [isAiPolishing, setIsAiPolishing] = useState(false);
+
+  const handleAiPolish = async () => {
+    setIsAiPolishing(true);
+    try {
+      const promptText =
+        content.trim() ||
+        `汤色${soupColor || '明亮'}，滋味表现${flavorTags.join('、') || '醇爽回甘'}。`;
+      const res = await analyzeSensoryProfile(promptText, {
+        name: item.name,
+        category: item.category,
+        year: item.year,
+        origin: item.origin
+      });
+      if (res.polished_note) {
+        setContent(res.polished_note);
+      }
+    } catch (e) {
+      console.error('AI Polish error:', e);
+    } finally {
+      setIsAiPolishing(false);
+    }
+  };
 
   const fetchNotes = async () => {
     setIsLoading(true);
@@ -279,12 +303,33 @@ export const TastingNotesManager: React.FC<TastingNotesManagerProps> = ({ item }
 
           {/* Detailed Notes */}
           <div>
-            <label className="text-xs font-semibold text-tea-600 uppercase tracking-wider block mb-1.5">
-              品饮心得与变化
-            </label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-semibold text-tea-600 uppercase tracking-wider block">
+                品饮心得与变化
+              </label>
+              <button
+                type="button"
+                onClick={handleAiPolish}
+                disabled={isAiPolishing}
+                className="text-[11px] font-serif text-[#3d655a] hover:text-[#2c4941] flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/60 transition-colors"
+                title="AI 润色为优美文学茶评"
+              >
+                {isAiPolishing ? (
+                  <>
+                    <Loader2 size={12} className="animate-spin" />
+                    <span>AI 润色中...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles size={12} className="text-amber-600" />
+                    <span>AI 润色文人品记</span>
+                  </>
+                )}
+              </button>
+            </div>
             <textarea
               rows={3}
-              className="w-full px-3 py-2 bg-white border border-tea-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-accent/40 text-tea-800 text-sm placeholder-tea-300 resize-none"
+              className="w-full px-3 py-2 bg-white border border-tea-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-accent/40 text-tea-800 text-sm placeholder-tea-300 resize-none font-serif"
               placeholder="初泡花香高扬，三泡后汤水厚度显著，回甘悠长生津如泉..."
               value={content}
               onChange={(e) => setContent(e.target.value)}
