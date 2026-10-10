@@ -244,30 +244,10 @@
       color: #345e52;
     }
 
-    /* Print Styles: Dedicated printable card view */
+    /* Print Styles: Clean fallback */
     @media print {
-      body * {
-        visibility: hidden !important;
-      }
-      #printable-tea-card,
-      #printable-tea-card * {
-        visibility: visible !important;
-      }
-      #printable-tea-card {
-        position: fixed !important;
-        left: 0 !important;
-        top: 0 !important;
-        width: 100% !important;
-        max-width: 650px !important;
-        margin: 0 auto !important;
-        box-shadow: none !important;
-        border: 2px solid #78716c !important;
-        background: #fdfbf7 !important;
-        -webkit-print-color-adjust: exact !important;
-        print-color-adjust: exact !important;
-      }
       @page {
-        margin: 1.5cm;
+        margin: 1cm;
         size: auto;
       }
     }

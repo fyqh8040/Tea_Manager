@@ -6,6 +6,7 @@ export interface FlavorRadarProps {
   onChange?: (updated: FlavorProfile) => void;
   size?: number;
   readOnly?: boolean;
+  labelFontSize?: number;
 }
 
 const DIMENSIONS: Array<{ key: keyof FlavorProfile; label: string }> = [
@@ -21,12 +22,15 @@ export const FlavorRadar: React.FC<FlavorRadarProps> = ({
   data = { aroma: 4, aftertaste: 4, salivation: 4, endurance: 4, body: 4, sensation: 3 },
   onChange,
   size = 240,
-  readOnly = false
+  readOnly = false,
+  labelFontSize
 }) => {
   const center = size / 2;
-  const radius = size * 0.38;
+  // 优化半径为 0.33，预留充裕的上下边距，杜绝标签与上层标题发生重叠紧贴
+  const radius = size * 0.33;
   const levels = [1, 2, 3, 4, 5];
   const total = DIMENSIONS.length;
+  const actualFontSize = labelFontSize ?? (size <= 200 ? 11.5 : 12);
 
   const getCoordinates = (index: number, value: number) => {
     const angle = (Math.PI * 2 / total) * index - Math.PI / 2;
@@ -39,7 +43,9 @@ export const FlavorRadar: React.FC<FlavorRadarProps> = ({
 
   const getLabelCoordinates = (index: number) => {
     const angle = (Math.PI * 2 / total) * index - Math.PI / 2;
-    const r = radius + 24;
+    // 针对顶部（index 0）与底部（index 3）垂直标签微调安全距离，确保在 SVG 内部居中舒适呈现
+    const isVertical = index === 0 || index === 3;
+    const r = radius + (isVertical ? 17 : 20);
     return {
       x: center + r * Math.cos(angle),
       y: center + r * Math.sin(angle)
@@ -127,9 +133,19 @@ export const FlavorRadar: React.FC<FlavorRadarProps> = ({
               y={y}
               textAnchor="middle"
               dominantBaseline="middle"
-              className="text-[10px] font-serif fill-tea-700 font-medium tracking-tight"
+              fontSize={actualFontSize}
+              style={{ fontSize: `${actualFontSize}px` }}
+              className="font-serif fill-stone-700 font-medium tracking-normal select-none"
             >
-              {dim.label} {val > 0 && <tspan className="text-[9px] fill-accent font-mono font-bold">({val})</tspan>}
+              {dim.label} {val > 0 && (
+                <tspan
+                  fontSize={Math.max(9.5, actualFontSize - 1.5)}
+                  style={{ fontSize: `${Math.max(9.5, actualFontSize - 1.5)}px` }}
+                  className="fill-[#3d655a] font-mono font-bold"
+                >
+                  ({val})
+                </tspan>
+              )}
             </text>
           );
         })}
