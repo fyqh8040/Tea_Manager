@@ -112,7 +112,7 @@ export function buildCollectionSummary(items: TeaItem[]): CollectionSummary {
 export async function sendSommelierChat(
   messages: Array<{ role: 'user' | 'assistant'; content: string }>,
   summary?: CollectionSummary
-): Promise<{ reply: string; isFallback?: boolean }> {
+): Promise<{ reply: string; isFallback?: boolean; usedModel?: string; modelDisplayName?: string; warning?: string }> {
   const config = getAiConfig();
 
   try {
@@ -134,7 +134,10 @@ export async function sendSommelierChat(
     const data = await res.json();
     return {
       reply: data.reply || '茶烟袅袅，侍茶师暂未领会您的深意，请换一种方式与我交流。',
-      isFallback: !!data.isFallback
+      isFallback: !!data.isFallback,
+      usedModel: data.usedModel,
+      modelDisplayName: data.modelDisplayName,
+      warning: data.warning
     };
   } catch (err: any) {
     console.warn('AI Chat API fallback:', err);
@@ -142,7 +145,9 @@ export async function sendSommelierChat(
     const query = messages[messages.length - 1]?.content || '';
     return {
       reply: `【茶席侍茶师】\n水沸声清，已为您调取私房茶学知识库。\n\n关于您咨询的「${query.slice(0, 20)}」：\n• 若为晨起或午后，建议冲泡高香乌龙或古树生普，水温98℃高冲，醒脑提神；\n• 若为晚间，建议选择五年以上陈年老白茶或熟普，以紫砂小品壶冲泡，茶性温和醇润，养胃安神。`,
-      isFallback: true
+      isFallback: true,
+      usedModel: 'builtin',
+      modelDisplayName: '内置茶学专家 (离线知识库)'
     };
   }
 }

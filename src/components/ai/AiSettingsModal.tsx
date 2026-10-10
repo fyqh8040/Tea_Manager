@@ -30,6 +30,12 @@ export const AiSettingsModal: React.FC<AiSettingsModalProps> = ({
   const [showTutorial, setShowTutorial] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
 
+  React.useEffect(() => {
+    if (isOpen) {
+      setConfig(getAiConfig());
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const handleSave = () => {
@@ -138,7 +144,7 @@ export const AiSettingsModal: React.FC<AiSettingsModalProps> = ({
                     ⚡ Google Gemini 官方大模型
                   </span>
                   <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-100 text-amber-800 font-sans font-medium">
-                    Gemini 3.8 Flash
+                    {config.geminiModel && config.geminiModel !== 'gemini-2.5-flash' ? config.geminiModel : 'gemini-3.8-flash'}
                   </span>
                 </div>
               </div>

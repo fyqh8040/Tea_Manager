@@ -102,6 +102,8 @@ export interface AiChatMessage {
   content: string;
   timestamp: number;
   isFallback?: boolean;
+  usedModel?: string;
+  modelDisplayName?: string;
 }
 
 export interface SensoryAnalysisResult {

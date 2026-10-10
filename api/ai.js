@@ -389,7 +389,11 @@ export default async function handler(req, res) {
   // 1. 若选择或降级为内置茶学专家引擎 (免 Key 零成本)
   if (provider === 'builtin') {
     const fallbackResult = runBuiltinExpertEngine(currentAction, req.body || {});
-    return res.status(200).json(fallbackResult);
+    return res.status(200).json({
+      ...fallbackResult,
+      usedModel: 'builtin',
+      modelDisplayName: '内置茶学专家'
+    });
   }
 
   // 2. 若选择 OpenAI 兼容接口 (DeepSeek / 硅基流动 / Qwen)
@@ -420,17 +424,29 @@ ${collectionWaresStr || '（暂无已录入茶器）'}
 
       if (currentAction === 'chat') {
         const reply = await callOpenAiCompatible(aiConfig, messages || [], systemPrompt);
-        return res.status(200).json({ reply, isFallback: false });
+        const usedModel = aiConfig?.customModel || 'openai_compatible';
+        return res.status(200).json({
+          reply,
+          usedModel,
+          modelDisplayName: usedModel,
+          isFallback: false
+        });
       }
 
       // 若为 sensory 或 vision，在未做结构化解析时优雅回退至专家推导引擎
       const fallbackResult = runBuiltinExpertEngine(currentAction, req.body || {});
-      return res.status(200).json(fallbackResult);
+      return res.status(200).json({
+        ...fallbackResult,
+        usedModel: 'builtin',
+        modelDisplayName: '内置茶学专家 (离线知识库)'
+      });
     } catch (err) {
       console.warn('OpenAI compatible call error, fallback to builtin:', err);
       const fallback = runBuiltinExpertEngine(currentAction, req.body || {});
       return res.status(200).json({
         ...fallback,
+        usedModel: 'builtin',
+        modelDisplayName: '内置茶学专家 (降级运行)',
         warning: `自定义模型调用失败 (${err.message})，已切换至内置茶学专家。`
       });
     }
@@ -441,7 +457,12 @@ ${collectionWaresStr || '（暂无已录入茶器）'}
   if (!geminiKey || geminiKey.trim() === '' || geminiKey.includes('your-gemini-api-key')) {
     // 无 Key 时自动无缝启用内置茶学大师引擎
     const fallbackResult = runBuiltinExpertEngine(currentAction, req.body || {});
-    return res.status(200).json(fallbackResult);
+    return res.status(200).json({
+      ...fallbackResult,
+      usedModel: 'builtin',
+      modelDisplayName: '内置茶学专家 (未配置 Gemini Key)',
+      warning: '尚未配置 Gemini API Key，已自动由内置茶学专家为您服务。'
+    });
   }
 
   // 现代有效模型候选列表 (按稳定性与响应速度排序，避免 503 拥堵)
@@ -449,11 +470,11 @@ ${collectionWaresStr || '（暂无已录入茶器）'}
 
   async function callGeminiWithFallback(ai, preferredModel, params) {
     const modelsToTry = [];
-    if (
-      preferredModel &&
-      !['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-pro'].includes(preferredModel)
-    ) {
-      modelsToTry.push(preferredModel);
+    // 严格优先采用用户指定的模型
+    if (preferredModel) {
+      // 若包含已废弃的旧版本别名则转换为最新版本
+      const normalized = preferredModel === 'gemini-2.5-flash' ? 'gemini-3.8-flash' : preferredModel;
+      modelsToTry.push(normalized);
     }
     for (const m of CANDIDATE_GEMINI_MODELS) {
       if (!modelsToTry.includes(m)) {
@@ -656,6 +677,8 @@ ${collectionWaresStr || '（暂无已录入茶器）'}
     const fallback = runBuiltinExpertEngine(currentAction, req.body || {});
     return res.status(200).json({
       ...fallback,
+      usedModel: 'builtin',
+      modelDisplayName: '内置茶学专家 (降级运行)',
       warning: `Gemini API 调用异常 (${err.message || 'Error'})，已自动切换至内置专业茶学引擎。`
     });
   }

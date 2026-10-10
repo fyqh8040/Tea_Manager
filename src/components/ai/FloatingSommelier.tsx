@@ -80,6 +80,7 @@ export const FloatingSommelier: React.FC<FloatingSommelierProps> = ({
   const [activeCategoryIdx, setActiveCategoryIdx] = useState(0);
 
   const [aiConfig, setAiConfig] = useState<AiConfig>(() => getAiConfig());
+  const [activeModelName, setActiveModelName] = useState<string>('');
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [messages, setMessages] = useState<AiChatMessage[]>([
@@ -91,6 +92,15 @@ export const FloatingSommelier: React.FC<FloatingSommelierProps> = ({
       timestamp: Date.now()
     }
   ]);
+
+  // 跨组件 / 本地配置变更实时监听
+  useEffect(() => {
+    const handleStorageChange = () => {
+      setAiConfig(getAiConfig());
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -142,8 +152,14 @@ export const FloatingSommelier: React.FC<FloatingSommelierProps> = ({
         role: 'assistant',
         content: res.reply,
         timestamp: Date.now(),
-        isFallback: res.isFallback
+        isFallback: res.isFallback,
+        usedModel: res.usedModel,
+        modelDisplayName: res.modelDisplayName
       };
+
+      if (res.modelDisplayName || res.usedModel) {
+        setActiveModelName(res.modelDisplayName || res.usedModel || '');
+      }
 
       setMessages((prev) => [...prev, aiMsg]);
     } catch (err: any) {
@@ -250,12 +266,24 @@ export const FloatingSommelier: React.FC<FloatingSommelierProps> = ({
     return Array.from(new Set(suggestions)).slice(0, 3);
   };
 
-  // 引擎标签展示
+  // 引擎与模型标签展示（真实反映当前配置或最新调用的模型）
   const engineLabel = useMemo(() => {
-    if (aiConfig.provider === 'gemini') return '⚡ Gemini 2.5';
-    if (aiConfig.provider === 'openai_compatible') return '🚀 DeepSeek / 自定义';
+    if (activeModelName) {
+      if (activeModelName.startsWith('gemini')) {
+        return `⚡ ${activeModelName}`;
+      }
+      return activeModelName;
+    }
+    if (aiConfig.provider === 'gemini') {
+      const model = aiConfig.geminiModel || 'gemini-3.8-flash';
+      return `⚡ ${model}`;
+    }
+    if (aiConfig.provider === 'openai_compatible') {
+      const model = aiConfig.customModel || 'DeepSeek';
+      return `🚀 ${model}`;
+    }
     return '🍵 内置大师 (免Key)';
-  }, [aiConfig]);
+  }, [aiConfig, activeModelName]);
 
   const activeCategory = PROMPT_CATEGORIES[activeCategoryIdx] || PROMPT_CATEGORIES[0];
 
@@ -533,6 +561,25 @@ export const FloatingSommelier: React.FC<FloatingSommelierProps> = ({
                           </div>
                         </div>
                       )}
+                      {/* 模型版本与来源小标签 */}
+                      {!isUser && (msg.usedModel || msg.modelDisplayName || msg.isFallback !== undefined) && (
+                        <div className="mt-2 pt-1.5 border-t border-stone-100 flex items-center justify-between text-[10px] text-stone-400 font-sans">
+                          <span className="flex items-center gap-1">
+                            {msg.isFallback ? (
+                              <span className="inline-flex items-center gap-0.5 text-amber-700 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200">
+                                🍵 内置茶学知识库
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-0.5 text-emerald-800 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200">
+                                ⚡ {msg.usedModel || msg.modelDisplayName || '已连接模型'}
+                              </span>
+                            )}
+                          </span>
+                          <span className="text-[10px] text-stone-400">
+                            {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -633,7 +680,10 @@ export const FloatingSommelier: React.FC<FloatingSommelierProps> = ({
       <AiSettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
-        onConfigSaved={(updated) => setAiConfig(updated)}
+        onConfigSaved={(updated) => {
+          setAiConfig(updated);
+          setActiveModelName('');
+        }}
       />
     </>
   );
